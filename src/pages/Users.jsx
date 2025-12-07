@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, getDocs, doc, updateDoc, query, orderBy } from 'firebase/firestore';
-import { Search, Ban, CheckCircle, Mail } from 'lucide-react';
+import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { Search, Ban, CheckCircle, Mail, Calendar, User } from 'lucide-react';
 
 function Users() {
   const [users, setUsers] = useState([]);
@@ -17,6 +17,7 @@ function Users() {
     if (searchTerm) {
       const filtered = users.filter(user => 
         user.displayName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.nickname?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         user.email?.toLowerCase().includes(searchTerm.toLowerCase())
       );
       setFilteredUsers(filtered);
@@ -27,15 +28,20 @@ function Users() {
 
   const loadUsers = async () => {
     try {
-      const usersQuery = query(
-        collection(db, 'users'),
-        orderBy('createdAt', 'desc')
-      );
-      const snapshot = await getDocs(usersQuery);
+      // orderBy 제거 - createdAt 없는 사용자도 모두 가져오기
+      const snapshot = await getDocs(collection(db, 'users'));
       const usersData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
+      
+      // 클라이언트에서 정렬 (createdAt 있는 것 우선, 없으면 맨 뒤)
+      usersData.sort((a, b) => {
+        const dateA = a.createdAt?.toDate?.() || a.createdAt || new Date(0);
+        const dateB = b.createdAt?.toDate?.() || b.createdAt || new Date(0);
+        return dateB - dateA;
+      });
+      
       setUsers(usersData);
       setFilteredUsers(usersData);
     } catch (error) {
@@ -69,9 +75,38 @@ function Users() {
   };
 
   const formatDate = (timestamp) => {
-    if (!timestamp?.toDate) return '-';
-    const date = timestamp.toDate();
-    return `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`;
+    if (!timestamp) return '-';
+    
+    // Firestore Timestamp 객체인 경우
+    if (timestamp?.toDate) {
+      const date = timestamp.toDate();
+      return `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`;
+    }
+    
+    // 일반 Date 객체이거나 문자열인 경우
+    try {
+      const date = new Date(timestamp);
+      if (isNaN(date.getTime())) return '-';
+      return `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`;
+    } catch {
+      return '-';
+    }
+  };
+
+  const getDisplayName = (user) => {
+    return user.displayName || user.nickname || '이름 없음';
+  };
+
+  const getInitial = (user) => {
+    const name = user.displayName || user.nickname || user.email || '?';
+    return name.charAt(0).toUpperCase();
+  };
+
+  const getInitialColor = (user) => {
+    const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'];
+    const name = user.displayName || user.nickname || user.email || '';
+    const index = name.charCodeAt(0) % colors.length;
+    return colors[index];
   };
 
   if (loading) {
@@ -82,11 +117,11 @@ function Users() {
     <div style={styles.container}>
       <div style={styles.header}>
         <h1 style={styles.pageTitle}>회원 관리</h1>
-        <span style={styles.count}>총 {users.length}명</span>
+        <span style={styles.totalCount}>총 {users.length}명</span>
       </div>
 
       {/* 검색 */}
-      <div style={styles.searchBox}>
+      <div style={styles.searchContainer}>
         <Search size={20} color="#999" />
         <input
           type="text"
@@ -97,11 +132,11 @@ function Users() {
         />
       </div>
 
-      {/* 회원 목록 */}
+      {/* 회원 테이블 */}
       <div style={styles.tableContainer}>
         <table style={styles.table}>
           <thead>
-            <tr style={styles.tableHeader}>
+            <tr>
               <th style={styles.th}>회원정보</th>
               <th style={styles.th}>이메일</th>
               <th style={styles.th}>가입일</th>
@@ -112,32 +147,43 @@ function Users() {
           <tbody>
             {filteredUsers.length === 0 ? (
               <tr>
-                <td colSpan="5" style={styles.empty}>회원이 없습니다.</td>
+                <td colSpan="5" style={styles.emptyRow}>
+                  {searchTerm ? '검색 결과가 없습니다.' : '회원이 없습니다.'}
+                </td>
               </tr>
             ) : (
-              filteredUsers.map(user => (
-                <tr key={user.id} style={styles.tableRow}>
+              filteredUsers.map((user) => (
+                <tr key={user.id} style={styles.tr}>
                   <td style={styles.td}>
                     <div style={styles.userInfo}>
-                      <div style={styles.avatar}>
-                        {(user.displayName || user.email || '?')[0].toUpperCase()}
+                      <div 
+                        style={{
+                          ...styles.avatar,
+                          backgroundColor: getInitialColor(user)
+                        }}
+                      >
+                        {getInitial(user)}
                       </div>
-                      <span style={styles.userName}>{user.displayName || '이름 없음'}</span>
+                      <span style={styles.userName}>{getDisplayName(user)}</span>
                     </div>
                   </td>
                   <td style={styles.td}>
-                    <div style={styles.emailCell}>
+                    <div style={styles.emailContainer}>
                       <Mail size={14} color="#999" />
                       <span>{user.email || '-'}</span>
                     </div>
                   </td>
-                  <td style={styles.td}>{formatDate(user.createdAt)}</td>
                   <td style={styles.td}>
-                    {user.isBanned ? (
-                      <span style={styles.bannedBadge}>차단됨</span>
-                    ) : (
-                      <span style={styles.activeBadge}>활성</span>
-                    )}
+                    {formatDate(user.createdAt)}
+                  </td>
+                  <td style={styles.td}>
+                    <span style={{
+                      ...styles.statusBadge,
+                      backgroundColor: user.isBanned ? '#FFEBEE' : '#E8F5E9',
+                      color: user.isBanned ? '#F44336' : '#4CAF50',
+                    }}>
+                      {user.isBanned ? '차단됨' : '활성'}
+                    </span>
                   </td>
                   <td style={styles.td}>
                     <button
@@ -173,15 +219,7 @@ function Users() {
 
 const styles = {
   container: {
-    maxWidth: '1200px',
-    margin: '0 auto',
-  },
-  loading: {
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    height: '200px',
-    color: '#666',
+    padding: '0',
   },
   header: {
     display: 'flex',
@@ -193,58 +231,72 @@ const styles = {
     fontSize: '24px',
     fontWeight: '700',
     color: '#333',
+    margin: 0,
   },
-  count: {
+  totalCount: {
     fontSize: '14px',
     color: '#999',
     backgroundColor: '#f5f5f5',
     padding: '4px 12px',
     borderRadius: '12px',
   },
-  searchBox: {
+  loading: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '200px',
+    color: '#999',
+  },
+  searchContainer: {
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
     backgroundColor: '#fff',
     padding: '12px 16px',
-    borderRadius: '8px',
-    marginBottom: '16px',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+    borderRadius: '12px',
+    marginBottom: '20px',
+    border: '1px solid #eee',
   },
   searchInput: {
     flex: 1,
     border: 'none',
+    outline: 'none',
     fontSize: '14px',
-    color: '#333',
+    backgroundColor: 'transparent',
   },
   tableContainer: {
     backgroundColor: '#fff',
     borderRadius: '12px',
     overflow: 'hidden',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+    border: '1px solid #eee',
   },
   table: {
     width: '100%',
     borderCollapse: 'collapse',
   },
-  tableHeader: {
-    backgroundColor: '#f9f9f9',
-  },
   th: {
-    padding: '16px',
     textAlign: 'left',
-    fontSize: '14px',
+    padding: '16px',
+    backgroundColor: '#f9f9f9',
+    fontSize: '13px',
     fontWeight: '600',
     color: '#666',
     borderBottom: '1px solid #eee',
   },
-  tableRow: {
+  tr: {
     borderBottom: '1px solid #f5f5f5',
   },
   td: {
     padding: '16px',
     fontSize: '14px',
     color: '#333',
+    verticalAlign: 'middle',
+  },
+  emptyRow: {
+    padding: '40px',
+    textAlign: 'center',
+    color: '#999',
+    fontSize: '14px',
   },
   userInfo: {
     display: 'flex',
@@ -255,52 +307,39 @@ const styles = {
     width: '36px',
     height: '36px',
     borderRadius: '50%',
-    backgroundColor: '#FF6B6B',
-    color: '#fff',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '14px',
+    color: '#fff',
     fontWeight: '600',
+    fontSize: '14px',
   },
   userName: {
     fontWeight: '500',
   },
-  emailCell: {
+  emailContainer: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
+    gap: '6px',
     color: '#666',
+    fontSize: '13px',
   },
-  activeBadge: {
-    backgroundColor: '#E8F5E9',
-    color: '#4CAF50',
-    padding: '4px 12px',
-    borderRadius: '12px',
-    fontSize: '12px',
-    fontWeight: '500',
-  },
-  bannedBadge: {
-    backgroundColor: '#FFEBEE',
-    color: '#F44336',
-    padding: '4px 12px',
-    borderRadius: '12px',
+  statusBadge: {
+    padding: '4px 10px',
+    borderRadius: '6px',
     fontSize: '12px',
     fontWeight: '500',
   },
   actionBtn: {
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
-    padding: '8px 12px',
+    gap: '4px',
+    padding: '6px 12px',
     borderRadius: '6px',
     fontSize: '12px',
     fontWeight: '500',
-  },
-  empty: {
-    textAlign: 'center',
-    padding: '40px',
-    color: '#999',
+    cursor: 'pointer',
+    border: 'none',
   },
 };
 

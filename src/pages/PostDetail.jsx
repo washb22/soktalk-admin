@@ -26,7 +26,9 @@ import {
   Save,
   X,
   Reply,
-  CornerDownRight
+  CornerDownRight,
+  Plus,
+  Minus
 } from 'lucide-react';
 
 // 랜덤 닉네임 생성용
@@ -46,6 +48,10 @@ function PostDetail() {
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
   
+  // 조회수 수정용
+  const [editingViews, setEditingViews] = useState(false);
+  const [newViews, setNewViews] = useState(0);
+  
   // 댓글 작성용
   const [newComment, setNewComment] = useState('');
   const [commentAuthor, setCommentAuthor] = useState('익명');
@@ -53,7 +59,7 @@ function PostDetail() {
   const [submitting, setSubmitting] = useState(false);
   
   // 대댓글 작성용
-  const [replyingTo, setReplyingTo] = useState(null); // { commentId, authorName }
+  const [replyingTo, setReplyingTo] = useState(null); // { parentCommentId, authorName }
   const [replyText, setReplyText] = useState('');
   const [replyAuthor, setReplyAuthor] = useState('익명');
   const [isReplyAnonymous, setIsReplyAnonymous] = useState(true);
@@ -72,6 +78,7 @@ function PostDetail() {
         setPost(postData);
         setEditTitle(postData.title || '');
         setEditContent(postData.content || '');
+        setNewViews(postData.views || 0);
       }
 
       // 댓글 로드
@@ -136,6 +143,26 @@ function PostDetail() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // 조회수 수정
+  const updateViews = async () => {
+    try {
+      await updateDoc(doc(db, 'posts', postId), {
+        views: newViews,
+      });
+      setPost({ ...post, views: newViews });
+      setEditingViews(false);
+      alert('조회수가 수정되었습니다.');
+    } catch (error) {
+      console.error('조회수 수정 에러:', error);
+      alert('수정 중 오류가 발생했습니다.');
+    }
+  };
+
+  const adjustViews = (amount) => {
+    const adjusted = Math.max(0, newViews + amount);
+    setNewViews(adjusted);
   };
 
   const deletePost = async () => {
@@ -242,11 +269,14 @@ function PostDetail() {
     }
   };
 
-  // 대댓글 작성 시작
+  // 대댓글 작성 시작 (원댓글이든 대댓글이든 모두 가능)
   const startReply = (comment) => {
     const authorName = getDisplayName(comment);
+    // 대댓글이면 부모 댓글 ID 사용, 원댓글이면 현재 댓글 ID 사용
+    const parentId = comment.parentCommentId || comment.id;
+    
     setReplyingTo({ 
-      commentId: comment.id, 
+      parentCommentId: parentId, 
       authorName: authorName 
     });
     setReplyText('');
@@ -280,7 +310,7 @@ function PostDetail() {
         likes: [],
         isPinned: false,
         isAdminComment: true,
-        parentCommentId: replyingTo.commentId,
+        parentCommentId: replyingTo.parentCommentId,
         replyTo: replyingTo.authorName,
       };
 
@@ -345,6 +375,9 @@ function PostDetail() {
   }
 
   const organizedComments = organizeComments();
+  
+  // 부모 댓글 목록 (대댓글 폼 위치 결정용)
+  const parentComments = comments.filter(c => !c.parentCommentId);
 
   return (
     <div style={styles.container}>
@@ -436,11 +469,21 @@ function PostDetail() {
           </>
         )}
         
+        {/* 통계 (조회수 수정 가능) */}
         <div style={styles.postStats}>
-          <span style={styles.stat}>
+          {/* 조회수 - 클릭하면 수정 모드 */}
+          <div 
+            style={styles.statClickable}
+            onClick={() => {
+              setNewViews(post.views || 0);
+              setEditingViews(true);
+            }}
+            title="클릭하여 조회수 수정"
+          >
             <Eye size={16} />
-            {post.views || 0}
-          </span>
+            <span>{post.views || 0}</span>
+            <Edit3 size={12} style={{ marginLeft: 4, opacity: 0.5 }} />
+          </div>
           <span style={styles.stat}>
             <Heart size={16} />
             {post.likesArray?.length || 0}
@@ -450,6 +493,32 @@ function PostDetail() {
             {comments.length}
           </span>
         </div>
+
+        {/* 조회수 수정 모달 */}
+        {editingViews && (
+          <div style={styles.viewsEditContainer}>
+            <div style={styles.viewsEditBox}>
+              <span style={styles.viewsEditLabel}>조회수 수정</span>
+              <div style={styles.viewsEditControls}>
+                <button onClick={() => adjustViews(-10)} style={styles.viewsBtn}>-10</button>
+                <button onClick={() => adjustViews(-1)} style={styles.viewsBtn}>-1</button>
+                <input
+                  type="number"
+                  value={newViews}
+                  onChange={(e) => setNewViews(Math.max(0, parseInt(e.target.value) || 0))}
+                  style={styles.viewsInput}
+                />
+                <button onClick={() => adjustViews(1)} style={styles.viewsBtn}>+1</button>
+                <button onClick={() => adjustViews(10)} style={styles.viewsBtn}>+10</button>
+                <button onClick={() => adjustViews(100)} style={styles.viewsBtn}>+100</button>
+              </div>
+              <div style={styles.viewsEditActions}>
+                <button onClick={() => setEditingViews(false)} style={styles.viewsCancelBtn}>취소</button>
+                <button onClick={updateViews} style={styles.viewsSaveBtn}>저장</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 댓글 작성 */}
@@ -532,15 +601,14 @@ function PostDetail() {
                       <span style={styles.commentDate}>{formatDate(comment.createdAt)}</span>
                     </div>
                     <div style={styles.commentActions}>
-                      {!comment.parentCommentId && (
-                        <button
-                          onClick={() => startReply(comment)}
-                          style={styles.replyBtn}
-                          title="대댓글 달기"
-                        >
-                          <Reply size={14} />
-                        </button>
-                      )}
+                      {/* 모든 댓글에 답글 버튼 표시 */}
+                      <button
+                        onClick={() => startReply(comment)}
+                        style={styles.replyBtn}
+                        title="답글 달기"
+                      >
+                        <Reply size={14} />
+                      </button>
                       <button
                         onClick={() => deleteComment(comment.id)}
                         style={styles.commentDeleteBtn}
@@ -559,14 +627,12 @@ function PostDetail() {
                   <p style={styles.commentText}>{comment.text}</p>
                 </div>
 
-                {/* 대댓글 작성 폼 */}
-                {replyingTo && replyingTo.commentId === comment.id && (
+                {/* 대댓글 작성 폼 - 해당 부모 댓글의 마지막 대댓글 뒤에 표시 */}
+                {replyingTo && !comment.parentCommentId && replyingTo.parentCommentId === comment.id && (
                   <div style={styles.replyFormContainer}>
                     <div style={styles.replyFormHeader}>
                       <CornerDownRight size={16} color="#FF6B6B" />
-                      <span style={styles.replyFormTitle}>
-                        @{replyingTo.authorName}에게 답글
-                      </span>
+                      <span style={styles.replyFormTitle}>@{replyingTo.authorName}에게 답글</span>
                       <button onClick={cancelReply} style={styles.replyCancelBtn}>
                         <X size={14} />
                       </button>
@@ -593,7 +659,7 @@ function PostDetail() {
                             style={styles.nicknameInput}
                           />
                           <button type="button" onClick={generateRandomReplyName} style={styles.randomBtn}>
-                            <RefreshCw size={12} />
+                            <RefreshCw size={14} />
                           </button>
                         </div>
                       )}
@@ -603,10 +669,9 @@ function PostDetail() {
                       <textarea
                         value={replyText}
                         onChange={(e) => setReplyText(e.target.value)}
-                        placeholder="대댓글을 입력하세요..."
+                        placeholder="답글을 입력하세요..."
                         style={styles.replyTextarea}
                         rows={2}
-                        autoFocus
                       />
                       <button 
                         onClick={submitReply} 
@@ -630,72 +695,76 @@ function PostDetail() {
 const styles = {
   container: {
     maxWidth: '900px',
-    margin: '0 auto',
   },
   loading: {
     display: 'flex',
     justifyContent: 'center',
     alignItems: 'center',
     height: '200px',
-    color: '#666',
+    color: '#999',
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '24px',
+    marginBottom: '20px',
   },
   backBtn: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
-    padding: '10px 16px',
+    gap: '6px',
+    padding: '8px 16px',
     backgroundColor: '#f5f5f5',
     borderRadius: '8px',
-    fontSize: '14px',
     color: '#666',
+    fontSize: '14px',
+    cursor: 'pointer',
+    border: 'none',
   },
   actions: {
     display: 'flex',
     gap: '8px',
   },
-  actionBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '10px 16px',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: '500',
-  },
   editBtn: {
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
-    padding: '10px 16px',
-    backgroundColor: '#E8F5E9',
-    color: '#4CAF50',
+    padding: '8px 16px',
+    backgroundColor: '#E3F2FD',
+    color: '#1976D2',
     borderRadius: '8px',
     fontSize: '14px',
-    fontWeight: '500',
+    cursor: 'pointer',
+    border: 'none',
+  },
+  actionBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '8px 16px',
+    borderRadius: '8px',
+    fontSize: '14px',
+    cursor: 'pointer',
+    border: 'none',
   },
   deleteBtn: {
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
-    padding: '10px 16px',
+    padding: '8px 16px',
     backgroundColor: '#FFEBEE',
     color: '#F44336',
     borderRadius: '8px',
     fontSize: '14px',
-    fontWeight: '500',
+    cursor: 'pointer',
+    border: 'none',
   },
   postCard: {
     backgroundColor: '#fff',
     borderRadius: '12px',
     padding: '24px',
     marginBottom: '20px',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+    border: '1px solid #eee',
   },
   postHeader: {
     display: 'flex',
@@ -706,25 +775,25 @@ const styles = {
   category: {
     backgroundColor: '#FFF0F0',
     color: '#FF6B6B',
-    padding: '6px 12px',
+    padding: '4px 10px',
     borderRadius: '6px',
-    fontSize: '13px',
+    fontSize: '12px',
     fontWeight: '500',
   },
   hiddenBadge: {
     backgroundColor: '#FFF3E0',
     color: '#FF9800',
-    padding: '6px 12px',
+    padding: '4px 10px',
     borderRadius: '6px',
-    fontSize: '13px',
+    fontSize: '12px',
     fontWeight: '500',
   },
   adminBadge: {
     backgroundColor: '#E3F2FD',
     color: '#1976D2',
-    padding: '6px 12px',
+    padding: '4px 10px',
     borderRadius: '6px',
-    fontSize: '13px',
+    fontSize: '12px',
     fontWeight: '500',
   },
   postTitle: {
@@ -738,7 +807,7 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    fontSize: '14px',
+    fontSize: '13px',
     color: '#999',
     marginBottom: '20px',
   },
@@ -748,10 +817,93 @@ const styles = {
     lineHeight: '1.8',
     whiteSpace: 'pre-wrap',
     marginBottom: '20px',
-    padding: '20px',
+    paddingBottom: '20px',
+    borderBottom: '1px solid #f0f0f0',
+  },
+  postStats: {
+    display: 'flex',
+    gap: '16px',
+  },
+  stat: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '14px',
+    color: '#666',
+  },
+  statClickable: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '14px',
+    color: '#666',
+    cursor: 'pointer',
+    padding: '4px 8px',
+    borderRadius: '6px',
+    backgroundColor: '#f9f9f9',
+    transition: 'background-color 0.2s',
+  },
+  // 조회수 수정
+  viewsEditContainer: {
+    marginTop: '16px',
+    padding: '16px',
     backgroundColor: '#f9f9f9',
     borderRadius: '8px',
   },
+  viewsEditBox: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  viewsEditLabel: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#333',
+  },
+  viewsEditControls: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  viewsBtn: {
+    padding: '6px 12px',
+    backgroundColor: '#fff',
+    border: '1px solid #ddd',
+    borderRadius: '6px',
+    fontSize: '13px',
+    cursor: 'pointer',
+  },
+  viewsInput: {
+    width: '80px',
+    padding: '8px',
+    border: '1px solid #ddd',
+    borderRadius: '6px',
+    fontSize: '14px',
+    textAlign: 'center',
+  },
+  viewsEditActions: {
+    display: 'flex',
+    gap: '8px',
+    justifyContent: 'flex-end',
+  },
+  viewsCancelBtn: {
+    padding: '8px 16px',
+    backgroundColor: '#f5f5f5',
+    borderRadius: '6px',
+    fontSize: '13px',
+    cursor: 'pointer',
+    border: 'none',
+  },
+  viewsSaveBtn: {
+    padding: '8px 16px',
+    backgroundColor: '#FF6B6B',
+    color: '#fff',
+    borderRadius: '6px',
+    fontSize: '13px',
+    cursor: 'pointer',
+    border: 'none',
+  },
+  // 수정 모드
   editForm: {
     display: 'flex',
     flexDirection: 'column',
@@ -763,72 +915,61 @@ const styles = {
     gap: '8px',
   },
   editLabel: {
-    fontSize: '14px',
+    fontSize: '13px',
     fontWeight: '600',
-    color: '#333',
+    color: '#666',
   },
   editTitleInput: {
-    padding: '12px 16px',
-    border: '2px solid #4CAF50',
+    padding: '12px',
+    border: '1px solid #eee',
     borderRadius: '8px',
     fontSize: '16px',
-    color: '#333',
+    fontWeight: '600',
   },
   editContentInput: {
-    padding: '12px 16px',
-    border: '2px solid #4CAF50',
+    padding: '12px',
+    border: '1px solid #eee',
     borderRadius: '8px',
-    fontSize: '15px',
-    color: '#333',
+    fontSize: '14px',
     lineHeight: '1.6',
     resize: 'vertical',
   },
   editActions: {
     display: 'flex',
-    gap: '12px',
     justifyContent: 'flex-end',
+    gap: '8px',
   },
   cancelBtn: {
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
-    padding: '10px 20px',
+    padding: '10px 16px',
     backgroundColor: '#f5f5f5',
     color: '#666',
     borderRadius: '8px',
     fontSize: '14px',
-    fontWeight: '500',
+    cursor: 'pointer',
+    border: 'none',
   },
   saveBtn: {
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
-    padding: '10px 20px',
+    padding: '10px 16px',
     backgroundColor: '#4CAF50',
     color: '#fff',
     borderRadius: '8px',
     fontSize: '14px',
-    fontWeight: '500',
+    cursor: 'pointer',
+    border: 'none',
   },
-  postStats: {
-    display: 'flex',
-    gap: '20px',
-    paddingTop: '16px',
-    borderTop: '1px solid #f0f0f0',
-  },
-  stat: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    fontSize: '14px',
-    color: '#666',
-  },
+  // 댓글 작성
   commentWriteCard: {
     backgroundColor: '#fff',
     borderRadius: '12px',
-    padding: '24px',
+    padding: '20px',
     marginBottom: '20px',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+    border: '1px solid #eee',
   },
   sectionTitle: {
     fontSize: '16px',
@@ -845,9 +986,9 @@ const styles = {
   checkboxLabel: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
+    gap: '6px',
     fontSize: '14px',
-    color: '#333',
+    color: '#666',
     cursor: 'pointer',
   },
   checkbox: {
@@ -859,21 +1000,20 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    backgroundColor: '#f5f5f5',
-    padding: '8px 12px',
-    borderRadius: '6px',
   },
   nicknameInput: {
-    border: 'none',
-    backgroundColor: 'transparent',
+    padding: '6px 10px',
+    border: '1px solid #eee',
+    borderRadius: '6px',
     fontSize: '14px',
     width: '120px',
   },
   randomBtn: {
-    padding: '4px',
-    backgroundColor: '#FF6B6B',
-    color: '#fff',
-    borderRadius: '4px',
+    padding: '6px',
+    backgroundColor: '#f5f5f5',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    border: 'none',
   },
   commentInputRow: {
     display: 'flex',
@@ -894,33 +1034,39 @@ const styles = {
     backgroundColor: '#FF6B6B',
     color: '#fff',
     borderRadius: '8px',
+    cursor: 'pointer',
+    border: 'none',
     height: 'fit-content',
   },
+  // 댓글 목록
   commentsCard: {
     backgroundColor: '#fff',
     borderRadius: '12px',
-    padding: '24px',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+    padding: '20px',
+    border: '1px solid #eee',
   },
   empty: {
     textAlign: 'center',
     color: '#999',
-    padding: '40px',
+    padding: '40px 0',
+    fontSize: '14px',
   },
   commentList: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '12px',
+    gap: '0',
   },
   commentItem: {
-    padding: '16px',
-    backgroundColor: '#f9f9f9',
-    borderRadius: '8px',
+    padding: '16px 0',
+    borderBottom: '1px solid #f5f5f5',
   },
   replyItem: {
     marginLeft: '24px',
-    borderLeft: '3px solid #FF6B6B',
-    backgroundColor: '#FFF5F5',
+    paddingLeft: '16px',
+    borderLeft: '2px solid #FFE0E0',
+    backgroundColor: '#FFFAFA',
+    marginTop: '-1px',
+    borderRadius: '0 8px 8px 0',
   },
   commentHeader: {
     display: 'flex',
@@ -962,12 +1108,15 @@ const styles = {
     color: '#4CAF50',
     borderRadius: '6px',
     cursor: 'pointer',
+    border: 'none',
   },
   commentDeleteBtn: {
     padding: '6px',
     backgroundColor: '#FFEBEE',
     color: '#F44336',
     borderRadius: '6px',
+    cursor: 'pointer',
+    border: 'none',
   },
   replyTo: {
     fontSize: '12px',
@@ -1007,6 +1156,7 @@ const styles = {
     borderRadius: '4px',
     color: '#666',
     cursor: 'pointer',
+    border: 'none',
   },
   replyAuthorSection: {
     display: 'flex',
@@ -1034,6 +1184,8 @@ const styles = {
     color: '#fff',
     borderRadius: '6px',
     height: 'fit-content',
+    cursor: 'pointer',
+    border: 'none',
   },
 };
 
