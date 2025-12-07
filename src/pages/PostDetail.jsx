@@ -1,0 +1,1040 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { db } from '../firebase';
+import { 
+  doc, 
+  getDoc, 
+  collection, 
+  getDocs, 
+  deleteDoc, 
+  updateDoc,
+  addDoc,
+  query, 
+  orderBy 
+} from 'firebase/firestore';
+import { 
+  ArrowLeft, 
+  Trash2, 
+  Eye, 
+  EyeOff, 
+  Heart, 
+  MessageSquare,
+  Send,
+  User,
+  RefreshCw,
+  Edit3,
+  Save,
+  X,
+  Reply,
+  CornerDownRight
+} from 'lucide-react';
+
+// 랜덤 닉네임 생성용
+const adjectives = ['행복한', '슬픈', '외로운', '설레는', '두근거리는', '걱정되는', '기대되는', '불안한', '떨리는', '애틋한'];
+const nouns = ['사랑꾼', '짝사랑러', '연애초보', '솔로', '커플', '썸남', '썸녀', '고민러', '연인', '짝꿍'];
+
+function PostDetail() {
+  const { postId } = useParams();
+  const navigate = useNavigate();
+  const [post, setPost] = useState(null);
+  const [comments, setComments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  
+  // 게시글 수정용
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editContent, setEditContent] = useState('');
+  const [saving, setSaving] = useState(false);
+  
+  // 댓글 작성용
+  const [newComment, setNewComment] = useState('');
+  const [commentAuthor, setCommentAuthor] = useState('익명');
+  const [isAnonymous, setIsAnonymous] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  
+  // 대댓글 작성용
+  const [replyingTo, setReplyingTo] = useState(null); // { commentId, authorName }
+  const [replyText, setReplyText] = useState('');
+  const [replyAuthor, setReplyAuthor] = useState('익명');
+  const [isReplyAnonymous, setIsReplyAnonymous] = useState(true);
+  const [replySubmitting, setReplySubmitting] = useState(false);
+
+  useEffect(() => {
+    loadPostAndComments();
+  }, [postId]);
+
+  const loadPostAndComments = async () => {
+    try {
+      // 게시글 로드
+      const postDoc = await getDoc(doc(db, 'posts', postId));
+      if (postDoc.exists()) {
+        const postData = { id: postDoc.id, ...postDoc.data() };
+        setPost(postData);
+        setEditTitle(postData.title || '');
+        setEditContent(postData.content || '');
+      }
+
+      // 댓글 로드
+      const commentsQuery = query(
+        collection(db, 'posts', postId, 'comments'),
+        orderBy('createdAt', 'asc')
+      );
+      const commentsSnapshot = await getDocs(commentsQuery);
+      const commentsData = commentsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setComments(commentsData);
+    } catch (error) {
+      console.error('데이터 로드 에러:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startEditing = () => {
+    setEditTitle(post.title || '');
+    setEditContent(post.content || '');
+    setIsEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setEditTitle(post.title || '');
+    setEditContent(post.content || '');
+    setIsEditing(false);
+  };
+
+  const saveEdit = async () => {
+    if (!editTitle.trim()) {
+      alert('제목을 입력해주세요.');
+      return;
+    }
+    if (!editContent.trim()) {
+      alert('내용을 입력해주세요.');
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      await updateDoc(doc(db, 'posts', postId), {
+        title: editTitle.trim(),
+        content: editContent.trim(),
+        updatedAt: new Date(),
+      });
+
+      setPost({
+        ...post,
+        title: editTitle.trim(),
+        content: editContent.trim(),
+      });
+      setIsEditing(false);
+      alert('게시글이 수정되었습니다.');
+    } catch (error) {
+      console.error('수정 에러:', error);
+      alert('수정 중 오류가 발생했습니다.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deletePost = async () => {
+    if (!window.confirm('이 게시글을 삭제하시겠습니까?\n(댓글도 모두 삭제됩니다)')) return;
+
+    try {
+      // 댓글들 먼저 삭제
+      for (const comment of comments) {
+        await deleteDoc(doc(db, 'posts', postId, 'comments', comment.id));
+      }
+      // 게시글 삭제
+      await deleteDoc(doc(db, 'posts', postId));
+      alert('삭제되었습니다.');
+      navigate('/posts');
+    } catch (error) {
+      console.error('삭제 에러:', error);
+      alert('삭제 중 오류가 발생했습니다.');
+    }
+  };
+
+  const toggleHidden = async () => {
+    try {
+      await updateDoc(doc(db, 'posts', postId), {
+        isHidden: !post.isHidden,
+      });
+      setPost({ ...post, isHidden: !post.isHidden });
+      alert(post.isHidden ? '게시글이 공개되었습니다.' : '게시글이 숨김 처리되었습니다.');
+    } catch (error) {
+      console.error('숨김 처리 에러:', error);
+      alert('처리 중 오류가 발생했습니다.');
+    }
+  };
+
+  const deleteComment = async (commentId) => {
+    if (!window.confirm('이 댓글을 삭제하시겠습니까?')) return;
+
+    try {
+      await deleteDoc(doc(db, 'posts', postId, 'comments', commentId));
+      setComments(comments.filter(c => c.id !== commentId));
+      
+      // 댓글 수 업데이트
+      await updateDoc(doc(db, 'posts', postId), {
+        commentsCount: comments.length - 1
+      });
+      
+      alert('삭제되었습니다.');
+    } catch (error) {
+      console.error('삭제 에러:', error);
+      alert('삭제 중 오류가 발생했습니다.');
+    }
+  };
+
+  const generateRandomName = () => {
+    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const noun = nouns[Math.floor(Math.random() * nouns.length)];
+    const num = Math.floor(Math.random() * 100);
+    setCommentAuthor(`${adj}${noun}${num}`);
+  };
+
+  const generateRandomReplyName = () => {
+    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const noun = nouns[Math.floor(Math.random() * nouns.length)];
+    const num = Math.floor(Math.random() * 100);
+    setReplyAuthor(`${adj}${noun}${num}`);
+  };
+
+  const submitComment = async () => {
+    if (!newComment.trim()) {
+      alert('댓글 내용을 입력해주세요.');
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const fakeUserId = `admin_${Date.now()}`;
+      
+      const commentData = {
+        text: newComment.trim(),
+        userId: fakeUserId,
+        userName: isAnonymous ? null : commentAuthor,
+        isAnonymous,
+        createdAt: new Date(),
+        likes: [],
+        isPinned: false,
+        isAdminComment: true,
+      };
+
+      const docRef = await addDoc(collection(db, 'posts', postId, 'comments'), commentData);
+      
+      // 댓글 수 업데이트
+      await updateDoc(doc(db, 'posts', postId), {
+        commentsCount: comments.length + 1
+      });
+
+      setComments([...comments, { id: docRef.id, ...commentData }]);
+      setNewComment('');
+      alert('댓글이 등록되었습니다.');
+    } catch (error) {
+      console.error('댓글 등록 에러:', error);
+      alert('등록 중 오류가 발생했습니다.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 대댓글 작성 시작
+  const startReply = (comment) => {
+    const authorName = getDisplayName(comment);
+    setReplyingTo({ 
+      commentId: comment.id, 
+      authorName: authorName 
+    });
+    setReplyText('');
+    setIsReplyAnonymous(true);
+  };
+
+  // 대댓글 취소
+  const cancelReply = () => {
+    setReplyingTo(null);
+    setReplyText('');
+  };
+
+  // 대댓글 제출
+  const submitReply = async () => {
+    if (!replyText.trim()) {
+      alert('대댓글 내용을 입력해주세요.');
+      return;
+    }
+
+    setReplySubmitting(true);
+
+    try {
+      const fakeUserId = `admin_${Date.now()}`;
+      
+      const replyData = {
+        text: replyText.trim(),
+        userId: fakeUserId,
+        userName: isReplyAnonymous ? null : replyAuthor,
+        isAnonymous: isReplyAnonymous,
+        createdAt: new Date(),
+        likes: [],
+        isPinned: false,
+        isAdminComment: true,
+        parentCommentId: replyingTo.commentId,
+        replyTo: replyingTo.authorName,
+      };
+
+      const docRef = await addDoc(collection(db, 'posts', postId, 'comments'), replyData);
+      
+      // 댓글 수 업데이트
+      await updateDoc(doc(db, 'posts', postId), {
+        commentsCount: comments.length + 1
+      });
+
+      setComments([...comments, { id: docRef.id, ...replyData }]);
+      setReplyText('');
+      setReplyingTo(null);
+      alert('대댓글이 등록되었습니다.');
+    } catch (error) {
+      console.error('대댓글 등록 에러:', error);
+      alert('등록 중 오류가 발생했습니다.');
+    } finally {
+      setReplySubmitting(false);
+    }
+  };
+
+  const formatDate = (timestamp) => {
+    if (!timestamp?.toDate) return '-';
+    const date = timestamp.toDate();
+    return `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+  };
+
+  const getDisplayName = (item) => {
+    if (item.isAnonymous) return '익명';
+    return item.userName || item.authorName || '익명';
+  };
+
+  // 댓글 정렬: 원본 댓글 → 대댓글 순서
+  const organizeComments = () => {
+    const parentComments = comments.filter(c => !c.parentCommentId);
+    const replies = comments.filter(c => c.parentCommentId);
+    
+    const organized = [];
+    parentComments.forEach(parent => {
+      organized.push(parent);
+      // 해당 댓글의 대댓글들 추가
+      const childReplies = replies.filter(r => r.parentCommentId === parent.id);
+      organized.push(...childReplies);
+    });
+    
+    // 부모가 삭제된 대댓글들도 추가
+    const orphanReplies = replies.filter(r => 
+      !parentComments.find(p => p.id === r.parentCommentId)
+    );
+    organized.push(...orphanReplies);
+    
+    return organized;
+  };
+
+  if (loading) {
+    return <div style={styles.loading}>로딩 중...</div>;
+  }
+
+  if (!post) {
+    return <div style={styles.loading}>게시글을 찾을 수 없습니다.</div>;
+  }
+
+  const organizedComments = organizeComments();
+
+  return (
+    <div style={styles.container}>
+      {/* 헤더 */}
+      <div style={styles.header}>
+        <button onClick={() => navigate('/posts')} style={styles.backBtn}>
+          <ArrowLeft size={20} />
+          <span>목록으로</span>
+        </button>
+        
+        <div style={styles.actions}>
+          {!isEditing && (
+            <button onClick={startEditing} style={styles.editBtn}>
+              <Edit3 size={18} />
+              <span>수정</span>
+            </button>
+          )}
+          <button
+            onClick={toggleHidden}
+            style={{
+              ...styles.actionBtn,
+              backgroundColor: post.isHidden ? '#E3F2FD' : '#FFF3E0',
+            }}
+          >
+            {post.isHidden ? <Eye size={18} color="#1976D2" /> : <EyeOff size={18} color="#FF9800" />}
+            <span>{post.isHidden ? '공개하기' : '숨기기'}</span>
+          </button>
+          <button onClick={deletePost} style={styles.deleteBtn}>
+            <Trash2 size={18} />
+            <span>삭제</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 게시글 내용 */}
+      <div style={styles.postCard}>
+        <div style={styles.postHeader}>
+          <span style={styles.category}>{post.category || '일반'}</span>
+          {post.isHidden && <span style={styles.hiddenBadge}>숨김</span>}
+          {post.isAdminPost && <span style={styles.adminBadge}>관리자</span>}
+        </div>
+        
+        {isEditing ? (
+          // 수정 모드
+          <div style={styles.editForm}>
+            <div style={styles.editField}>
+              <label style={styles.editLabel}>제목</label>
+              <input
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                style={styles.editTitleInput}
+                placeholder="제목을 입력하세요"
+              />
+            </div>
+            <div style={styles.editField}>
+              <label style={styles.editLabel}>내용</label>
+              <textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                style={styles.editContentInput}
+                placeholder="내용을 입력하세요"
+                rows={10}
+              />
+            </div>
+            <div style={styles.editActions}>
+              <button onClick={cancelEditing} style={styles.cancelBtn}>
+                <X size={16} />
+                <span>취소</span>
+              </button>
+              <button onClick={saveEdit} disabled={saving} style={styles.saveBtn}>
+                <Save size={16} />
+                <span>{saving ? '저장 중...' : '저장'}</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          // 보기 모드
+          <>
+            <h1 style={styles.postTitle}>{post.title}</h1>
+            
+            <div style={styles.postMeta}>
+              <span>{getDisplayName(post)}</span>
+              <span>•</span>
+              <span>{formatDate(post.createdAt)}</span>
+            </div>
+            
+            <div style={styles.postContent}>{post.content}</div>
+          </>
+        )}
+        
+        <div style={styles.postStats}>
+          <span style={styles.stat}>
+            <Eye size={16} />
+            {post.views || 0}
+          </span>
+          <span style={styles.stat}>
+            <Heart size={16} />
+            {post.likesArray?.length || 0}
+          </span>
+          <span style={styles.stat}>
+            <MessageSquare size={16} />
+            {comments.length}
+          </span>
+        </div>
+      </div>
+
+      {/* 댓글 작성 */}
+      <div style={styles.commentWriteCard}>
+        <h2 style={styles.sectionTitle}>댓글 작성 (관리자)</h2>
+        
+        <div style={styles.authorSection}>
+          <label style={styles.checkboxLabel}>
+            <input
+              type="checkbox"
+              checked={isAnonymous}
+              onChange={(e) => setIsAnonymous(e.target.checked)}
+              style={styles.checkbox}
+            />
+            <span>익명으로 작성</span>
+          </label>
+          
+          {!isAnonymous && (
+            <div style={styles.authorInput}>
+              <User size={16} color="#666" />
+              <input
+                type="text"
+                value={commentAuthor}
+                onChange={(e) => setCommentAuthor(e.target.value)}
+                placeholder="닉네임"
+                style={styles.nicknameInput}
+              />
+              <button type="button" onClick={generateRandomName} style={styles.randomBtn}>
+                <RefreshCw size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+        
+        <div style={styles.commentInputRow}>
+          <textarea
+            value={newComment}
+            onChange={(e) => setNewComment(e.target.value)}
+            placeholder="댓글을 입력하세요..."
+            style={styles.commentTextarea}
+            rows={3}
+          />
+          <button 
+            onClick={submitComment} 
+            disabled={submitting}
+            style={styles.submitBtn}
+          >
+            <Send size={18} />
+          </button>
+        </div>
+      </div>
+
+      {/* 댓글 목록 */}
+      <div style={styles.commentsCard}>
+        <h2 style={styles.sectionTitle}>댓글 {comments.length}개</h2>
+        
+        {comments.length === 0 ? (
+          <p style={styles.empty}>댓글이 없습니다.</p>
+        ) : (
+          <div style={styles.commentList}>
+            {organizedComments.map((comment) => (
+              <div key={comment.id}>
+                <div 
+                  style={{
+                    ...styles.commentItem,
+                    ...(comment.parentCommentId ? styles.replyItem : {}),
+                  }}
+                >
+                  <div style={styles.commentHeader}>
+                    <div style={styles.commentInfo}>
+                      {comment.parentCommentId && (
+                        <CornerDownRight size={14} color="#FF6B6B" style={{ marginRight: 4 }} />
+                      )}
+                      <span style={styles.commentAuthor}>
+                        {getDisplayName(comment)}
+                        {comment.isAdminComment && (
+                          <span style={styles.adminTag}>관리자</span>
+                        )}
+                      </span>
+                      <span style={styles.commentDate}>{formatDate(comment.createdAt)}</span>
+                    </div>
+                    <div style={styles.commentActions}>
+                      {!comment.parentCommentId && (
+                        <button
+                          onClick={() => startReply(comment)}
+                          style={styles.replyBtn}
+                          title="대댓글 달기"
+                        >
+                          <Reply size={14} />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => deleteComment(comment.id)}
+                        style={styles.commentDeleteBtn}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {comment.replyTo && (
+                    <div style={styles.replyTo}>
+                      @{comment.replyTo}
+                    </div>
+                  )}
+                  
+                  <p style={styles.commentText}>{comment.text}</p>
+                </div>
+
+                {/* 대댓글 작성 폼 */}
+                {replyingTo && replyingTo.commentId === comment.id && (
+                  <div style={styles.replyFormContainer}>
+                    <div style={styles.replyFormHeader}>
+                      <CornerDownRight size={16} color="#FF6B6B" />
+                      <span style={styles.replyFormTitle}>
+                        @{replyingTo.authorName}에게 답글
+                      </span>
+                      <button onClick={cancelReply} style={styles.replyCancelBtn}>
+                        <X size={14} />
+                      </button>
+                    </div>
+                    
+                    <div style={styles.replyAuthorSection}>
+                      <label style={styles.checkboxLabel}>
+                        <input
+                          type="checkbox"
+                          checked={isReplyAnonymous}
+                          onChange={(e) => setIsReplyAnonymous(e.target.checked)}
+                          style={styles.checkbox}
+                        />
+                        <span>익명</span>
+                      </label>
+                      
+                      {!isReplyAnonymous && (
+                        <div style={styles.authorInput}>
+                          <input
+                            type="text"
+                            value={replyAuthor}
+                            onChange={(e) => setReplyAuthor(e.target.value)}
+                            placeholder="닉네임"
+                            style={styles.nicknameInput}
+                          />
+                          <button type="button" onClick={generateRandomReplyName} style={styles.randomBtn}>
+                            <RefreshCw size={12} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div style={styles.replyInputRow}>
+                      <textarea
+                        value={replyText}
+                        onChange={(e) => setReplyText(e.target.value)}
+                        placeholder="대댓글을 입력하세요..."
+                        style={styles.replyTextarea}
+                        rows={2}
+                        autoFocus
+                      />
+                      <button 
+                        onClick={submitReply} 
+                        disabled={replySubmitting}
+                        style={styles.replySubmitBtn}
+                      >
+                        <Send size={16} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  container: {
+    maxWidth: '900px',
+    margin: '0 auto',
+  },
+  loading: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '200px',
+    color: '#666',
+  },
+  header: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '24px',
+  },
+  backBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '10px 16px',
+    backgroundColor: '#f5f5f5',
+    borderRadius: '8px',
+    fontSize: '14px',
+    color: '#666',
+  },
+  actions: {
+    display: 'flex',
+    gap: '8px',
+  },
+  actionBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '10px 16px',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  editBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '10px 16px',
+    backgroundColor: '#E8F5E9',
+    color: '#4CAF50',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  deleteBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '10px 16px',
+    backgroundColor: '#FFEBEE',
+    color: '#F44336',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  postCard: {
+    backgroundColor: '#fff',
+    borderRadius: '12px',
+    padding: '24px',
+    marginBottom: '20px',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+  },
+  postHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginBottom: '16px',
+  },
+  category: {
+    backgroundColor: '#FFF0F0',
+    color: '#FF6B6B',
+    padding: '6px 12px',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '500',
+  },
+  hiddenBadge: {
+    backgroundColor: '#FFF3E0',
+    color: '#FF9800',
+    padding: '6px 12px',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '500',
+  },
+  adminBadge: {
+    backgroundColor: '#E3F2FD',
+    color: '#1976D2',
+    padding: '6px 12px',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '500',
+  },
+  postTitle: {
+    fontSize: '22px',
+    fontWeight: '700',
+    color: '#333',
+    marginBottom: '12px',
+    lineHeight: '1.4',
+  },
+  postMeta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '14px',
+    color: '#999',
+    marginBottom: '20px',
+  },
+  postContent: {
+    fontSize: '15px',
+    color: '#333',
+    lineHeight: '1.8',
+    whiteSpace: 'pre-wrap',
+    marginBottom: '20px',
+    padding: '20px',
+    backgroundColor: '#f9f9f9',
+    borderRadius: '8px',
+  },
+  editForm: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+  },
+  editField: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  editLabel: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#333',
+  },
+  editTitleInput: {
+    padding: '12px 16px',
+    border: '2px solid #4CAF50',
+    borderRadius: '8px',
+    fontSize: '16px',
+    color: '#333',
+  },
+  editContentInput: {
+    padding: '12px 16px',
+    border: '2px solid #4CAF50',
+    borderRadius: '8px',
+    fontSize: '15px',
+    color: '#333',
+    lineHeight: '1.6',
+    resize: 'vertical',
+  },
+  editActions: {
+    display: 'flex',
+    gap: '12px',
+    justifyContent: 'flex-end',
+  },
+  cancelBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '10px 20px',
+    backgroundColor: '#f5f5f5',
+    color: '#666',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  saveBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '10px 20px',
+    backgroundColor: '#4CAF50',
+    color: '#fff',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  postStats: {
+    display: 'flex',
+    gap: '20px',
+    paddingTop: '16px',
+    borderTop: '1px solid #f0f0f0',
+  },
+  stat: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '14px',
+    color: '#666',
+  },
+  commentWriteCard: {
+    backgroundColor: '#fff',
+    borderRadius: '12px',
+    padding: '24px',
+    marginBottom: '20px',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+  },
+  sectionTitle: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: '16px',
+  },
+  authorSection: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+    marginBottom: '12px',
+  },
+  checkboxLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '14px',
+    color: '#333',
+    cursor: 'pointer',
+  },
+  checkbox: {
+    width: '16px',
+    height: '16px',
+    cursor: 'pointer',
+  },
+  authorInput: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    backgroundColor: '#f5f5f5',
+    padding: '8px 12px',
+    borderRadius: '6px',
+  },
+  nicknameInput: {
+    border: 'none',
+    backgroundColor: 'transparent',
+    fontSize: '14px',
+    width: '120px',
+  },
+  randomBtn: {
+    padding: '4px',
+    backgroundColor: '#FF6B6B',
+    color: '#fff',
+    borderRadius: '4px',
+  },
+  commentInputRow: {
+    display: 'flex',
+    gap: '12px',
+    alignItems: 'flex-end',
+  },
+  commentTextarea: {
+    flex: 1,
+    padding: '12px',
+    border: '1px solid #eee',
+    borderRadius: '8px',
+    fontSize: '14px',
+    resize: 'none',
+    lineHeight: '1.5',
+  },
+  submitBtn: {
+    padding: '12px 16px',
+    backgroundColor: '#FF6B6B',
+    color: '#fff',
+    borderRadius: '8px',
+    height: 'fit-content',
+  },
+  commentsCard: {
+    backgroundColor: '#fff',
+    borderRadius: '12px',
+    padding: '24px',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+  },
+  empty: {
+    textAlign: 'center',
+    color: '#999',
+    padding: '40px',
+  },
+  commentList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  commentItem: {
+    padding: '16px',
+    backgroundColor: '#f9f9f9',
+    borderRadius: '8px',
+  },
+  replyItem: {
+    marginLeft: '24px',
+    borderLeft: '3px solid #FF6B6B',
+    backgroundColor: '#FFF5F5',
+  },
+  commentHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '8px',
+  },
+  commentInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  commentAuthor: {
+    fontWeight: '600',
+    fontSize: '14px',
+    color: '#333',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  adminTag: {
+    backgroundColor: '#E3F2FD',
+    color: '#1976D2',
+    padding: '2px 6px',
+    borderRadius: '4px',
+    fontSize: '11px',
+  },
+  commentDate: {
+    fontSize: '12px',
+    color: '#999',
+  },
+  commentActions: {
+    display: 'flex',
+    gap: '8px',
+  },
+  replyBtn: {
+    padding: '6px',
+    backgroundColor: '#E8F5E9',
+    color: '#4CAF50',
+    borderRadius: '6px',
+    cursor: 'pointer',
+  },
+  commentDeleteBtn: {
+    padding: '6px',
+    backgroundColor: '#FFEBEE',
+    color: '#F44336',
+    borderRadius: '6px',
+  },
+  replyTo: {
+    fontSize: '12px',
+    color: '#FF6B6B',
+    marginBottom: '6px',
+    fontWeight: '500',
+  },
+  commentText: {
+    fontSize: '14px',
+    color: '#333',
+    lineHeight: '1.6',
+  },
+  // 대댓글 작성 폼 스타일
+  replyFormContainer: {
+    marginLeft: '24px',
+    marginTop: '8px',
+    padding: '16px',
+    backgroundColor: '#FFF5F5',
+    borderRadius: '8px',
+    borderLeft: '3px solid #FF6B6B',
+  },
+  replyFormHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginBottom: '12px',
+  },
+  replyFormTitle: {
+    fontSize: '13px',
+    color: '#FF6B6B',
+    fontWeight: '600',
+    flex: 1,
+  },
+  replyCancelBtn: {
+    padding: '4px',
+    backgroundColor: '#f5f5f5',
+    borderRadius: '4px',
+    color: '#666',
+    cursor: 'pointer',
+  },
+  replyAuthorSection: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    marginBottom: '12px',
+  },
+  replyInputRow: {
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'flex-end',
+  },
+  replyTextarea: {
+    flex: 1,
+    padding: '10px',
+    border: '1px solid #FFD0D0',
+    borderRadius: '6px',
+    fontSize: '13px',
+    resize: 'none',
+    lineHeight: '1.5',
+  },
+  replySubmitBtn: {
+    padding: '10px 14px',
+    backgroundColor: '#FF6B6B',
+    color: '#fff',
+    borderRadius: '6px',
+    height: 'fit-content',
+  },
+};
+
+export default PostDetail;
