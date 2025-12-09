@@ -9,6 +9,7 @@ import PostDetail from './pages/PostDetail';
 import WritePost from './pages/WritePost';
 import Comments from './pages/Comments';
 import Reports from './pages/Reports';
+import Usage from './pages/Usage';  // ✅ 추가
 
 const ADMIN_PASSWORD = 'thrxhr1234';
 
@@ -51,6 +52,7 @@ function App() {
           <Route path="/write" element={<WritePost />} />
           <Route path="/comments" element={<Comments />} />
           <Route path="/reports" element={<Reports />} />
+          <Route path="/usage" element={<Usage />} />  {/* ✅ 추가 */}
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Layout>

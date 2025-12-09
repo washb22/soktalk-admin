@@ -7,7 +7,8 @@ import {
   PenSquare, 
   MessageSquare, 
   AlertTriangle,
-  LogOut
+  LogOut,
+  BarChart3  // ✅ 추가
 } from 'lucide-react';
 
 const menuItems = [
@@ -17,6 +18,7 @@ const menuItems = [
   { path: '/write', icon: PenSquare, label: '글 작성' },
   { path: '/comments', icon: MessageSquare, label: '댓글 관리' },
   { path: '/reports', icon: AlertTriangle, label: '신고 관리' },
+  { path: '/usage', icon: BarChart3, label: '사용 현황' },  // ✅ 추가
 ];
 
 function Layout({ children, onLogout }) {
@@ -109,6 +111,7 @@ const styles = {
     fontSize: '14px',
     fontWeight: '500',
     transition: 'all 0.2s',
+    textDecoration: 'none',
   },
   logoutBtn: {
     display: 'flex',
@@ -120,12 +123,15 @@ const styles = {
     color: '#666',
     fontSize: '14px',
     fontWeight: '500',
+    cursor: 'pointer',
+    border: 'none',
   },
   main: {
     flex: 1,
     marginLeft: '240px',
     padding: '24px',
     minHeight: '100vh',
+    backgroundColor: '#f5f5f5',
   },
 };
 

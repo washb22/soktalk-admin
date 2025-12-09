@@ -269,14 +269,13 @@ function PostDetail() {
     }
   };
 
-  // 대댓글 작성 시작 (원댓글이든 대댓글이든 모두 가능)
+  // 대댓글 작성 시작 (어떤 댓글이든 그 댓글에 대한 답글 가능)
   const startReply = (comment) => {
     const authorName = getDisplayName(comment);
-    // 대댓글이면 부모 댓글 ID 사용, 원댓글이면 현재 댓글 ID 사용
-    const parentId = comment.parentCommentId || comment.id;
     
     setReplyingTo({ 
-      parentCommentId: parentId, 
+      commentId: comment.id,  // 클릭한 댓글의 ID
+      parentCommentId: comment.id,  // 부모 댓글 ID (바로 그 댓글)
       authorName: authorName 
     });
     setReplyText('');
@@ -344,24 +343,57 @@ function PostDetail() {
     return item.userName || item.authorName || '익명';
   };
 
-  // 댓글 정렬: 원본 댓글 → 대댓글 순서
+  // 댓글 정렬: 트리 구조로 정렬 (무한 깊이 대댓글 지원)
   const organizeComments = () => {
-    const parentComments = comments.filter(c => !c.parentCommentId);
-    const replies = comments.filter(c => c.parentCommentId);
+    // 각 댓글의 깊이를 계산
+    const getDepth = (comment, allComments, depth = 0) => {
+      if (!comment.parentCommentId) return 0;
+      const parent = allComments.find(c => c.id === comment.parentCommentId);
+      if (!parent) return depth + 1;
+      return getDepth(parent, allComments, depth + 1);
+    };
+
+    // 댓글에 깊이 정보 추가
+    const commentsWithDepth = comments.map(c => ({
+      ...c,
+      depth: getDepth(c, comments)
+    }));
+
+    // 원댓글들 (depth 0)
+    const rootComments = commentsWithDepth.filter(c => c.depth === 0);
     
+    // 재귀적으로 자식 댓글 찾기
+    const getChildren = (parentId) => {
+      return commentsWithDepth
+        .filter(c => c.parentCommentId === parentId)
+        .sort((a, b) => {
+          const aTime = a.createdAt?.toDate?.() || a.createdAt || new Date(0);
+          const bTime = b.createdAt?.toDate?.() || b.createdAt || new Date(0);
+          return aTime - bTime;
+        });
+    };
+
+    // 트리 구조로 정렬
     const organized = [];
-    parentComments.forEach(parent => {
-      organized.push(parent);
-      // 해당 댓글의 대댓글들 추가
-      const childReplies = replies.filter(r => r.parentCommentId === parent.id);
-      organized.push(...childReplies);
-    });
-    
-    // 부모가 삭제된 대댓글들도 추가
-    const orphanReplies = replies.filter(r => 
-      !parentComments.find(p => p.id === r.parentCommentId)
-    );
-    organized.push(...orphanReplies);
+    const addWithChildren = (comment) => {
+      organized.push(comment);
+      const children = getChildren(comment.id);
+      children.forEach(child => addWithChildren(child));
+    };
+
+    rootComments
+      .sort((a, b) => {
+        const aTime = a.createdAt?.toDate?.() || a.createdAt || new Date(0);
+        const bTime = b.createdAt?.toDate?.() || b.createdAt || new Date(0);
+        return aTime - bTime;
+      })
+      .forEach(root => addWithChildren(root));
+
+    // 부모가 삭제된 고아 댓글 추가
+    const organizedIds = new Set(organized.map(c => c.id));
+    commentsWithDepth
+      .filter(c => !organizedIds.has(c.id))
+      .forEach(orphan => organized.push({ ...orphan, depth: 0 }));
     
     return organized;
   };
@@ -375,9 +407,6 @@ function PostDetail() {
   }
 
   const organizedComments = organizeComments();
-  
-  // 부모 댓글 목록 (대댓글 폼 위치 결정용)
-  const parentComments = comments.filter(c => !c.parentCommentId);
 
   return (
     <div style={styles.container}>
@@ -584,12 +613,15 @@ function PostDetail() {
                 <div 
                   style={{
                     ...styles.commentItem,
-                    ...(comment.parentCommentId ? styles.replyItem : {}),
+                    ...(comment.depth > 0 ? {
+                      ...styles.replyItem,
+                      marginLeft: `${Math.min(comment.depth * 24, 72)}px`,  // 최대 3단계 들여쓰기
+                    } : {}),
                   }}
                 >
                   <div style={styles.commentHeader}>
                     <div style={styles.commentInfo}>
-                      {comment.parentCommentId && (
+                      {comment.depth > 0 && (
                         <CornerDownRight size={14} color="#FF6B6B" style={{ marginRight: 4 }} />
                       )}
                       <span style={styles.commentAuthor}>
@@ -627,9 +659,12 @@ function PostDetail() {
                   <p style={styles.commentText}>{comment.text}</p>
                 </div>
 
-                {/* 대댓글 작성 폼 - 해당 부모 댓글의 마지막 대댓글 뒤에 표시 */}
-                {replyingTo && !comment.parentCommentId && replyingTo.parentCommentId === comment.id && (
-                  <div style={styles.replyFormContainer}>
+                {/* 대댓글 작성 폼 - 클릭한 댓글 바로 아래에 표시 */}
+                {replyingTo && replyingTo.commentId === comment.id && (
+                  <div style={{
+                    ...styles.replyFormContainer,
+                    marginLeft: `${Math.min((comment.depth + 1) * 24, 72)}px`,
+                  }}>
                     <div style={styles.replyFormHeader}>
                       <CornerDownRight size={16} color="#FF6B6B" />
                       <span style={styles.replyFormTitle}>@{replyingTo.authorName}에게 답글</span>
