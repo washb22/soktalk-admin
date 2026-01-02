@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
   collection, 
   getDocs, 
@@ -19,7 +20,9 @@ import {
   X,
   Eye,
   EyeOff,
-  RefreshCw
+  RefreshCw,
+  Image,
+  Upload
 } from 'lucide-react';
 
 function Notices() {
@@ -28,11 +31,16 @@ function Notices() {
   const [showForm, setShowForm] = useState(false);
   const [editingNotice, setEditingNotice] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [uploading, setUploading] = useState(false);
   
   // 폼 상태
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [category, setCategory] = useState('전체');
+  const [imageUrl, setImageUrl] = useState('');
+  const [imagePreview, setImagePreview] = useState('');
+  
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     loadNotices();
@@ -62,8 +70,58 @@ function Notices() {
     setTitle('');
     setContent('');
     setCategory('전체');
+    setImageUrl('');
+    setImagePreview('');
     setEditingNotice(null);
     setShowForm(false);
+  };
+
+  // 이미지 파일 선택 처리
+  const handleImageSelect = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // 파일 크기 체크 (5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('이미지 크기는 5MB 이하여야 합니다.');
+      return;
+    }
+
+    // 미리보기 생성
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setImagePreview(e.target.result);
+    };
+    reader.readAsDataURL(file);
+
+    // Firebase Storage에 업로드
+    setUploading(true);
+    try {
+      const storage = getStorage();
+      const fileName = `notices/${Date.now()}_${file.name}`;
+      const storageRef = ref(storage, fileName);
+      
+      await uploadBytes(storageRef, file);
+      const downloadUrl = await getDownloadURL(storageRef);
+      
+      setImageUrl(downloadUrl);
+      alert('이미지가 업로드되었습니다.');
+    } catch (error) {
+      console.error('이미지 업로드 에러:', error);
+      alert('이미지 업로드에 실패했습니다.');
+      setImagePreview('');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // 이미지 제거
+  const removeImage = () => {
+    setImageUrl('');
+    setImagePreview('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const handleSubmit = async () => {
@@ -85,6 +143,7 @@ function Notices() {
           title: title.trim(),
           content: content.trim(),
           category,
+          imageUrl: imageUrl || null,
           updatedAt: new Date(),
         });
         alert('공지사항이 수정되었습니다.');
@@ -94,6 +153,7 @@ function Notices() {
           title: title.trim(),
           content: content.trim(),
           category,
+          imageUrl: imageUrl || null,
           isActive: true,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -116,6 +176,8 @@ function Notices() {
     setTitle(notice.title);
     setContent(notice.content);
     setCategory(notice.category || '전체');
+    setImageUrl(notice.imageUrl || '');
+    setImagePreview(notice.imageUrl || '');
     setShowForm(true);
   };
 
@@ -239,13 +301,51 @@ function Notices() {
             />
           </div>
 
+          {/* 이미지 업로드 */}
+          <div style={styles.formGroup}>
+            <label style={styles.label}>이미지 (선택)</label>
+            
+            {imagePreview ? (
+              <div style={styles.imagePreviewContainer}>
+                <img src={imagePreview} alt="미리보기" style={styles.imagePreview} />
+                <button onClick={removeImage} style={styles.removeImageBtn}>
+                  <X size={16} />
+                  <span>이미지 제거</span>
+                </button>
+              </div>
+            ) : (
+              <div 
+                style={styles.imageUploadArea}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {uploading ? (
+                  <span>업로드 중...</span>
+                ) : (
+                  <>
+                    <Upload size={24} color="#999" />
+                    <span style={styles.uploadText}>클릭하여 이미지 업로드</span>
+                    <span style={styles.uploadHint}>최대 5MB, JPG/PNG/GIF</span>
+                  </>
+                )}
+              </div>
+            )}
+            
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleImageSelect}
+              style={{ display: 'none' }}
+            />
+          </div>
+
           <div style={styles.formActions}>
             <button onClick={resetForm} style={styles.cancelBtn}>
               취소
             </button>
             <button 
               onClick={handleSubmit} 
-              disabled={submitting}
+              disabled={submitting || uploading}
               style={styles.submitBtn}
             >
               <Save size={18} />
@@ -275,6 +375,15 @@ function Notices() {
                 }}
               >
                 <div style={styles.noticeMain}>
+                  {/* 이미지 썸네일 */}
+                  {notice.imageUrl && (
+                    <img 
+                      src={notice.imageUrl} 
+                      alt="공지 이미지" 
+                      style={styles.noticeThumbnail}
+                    />
+                  )}
+                  
                   <div style={styles.noticeInfo}>
                     <div style={styles.noticeMeta}>
                       <span 
@@ -285,6 +394,12 @@ function Notices() {
                       >
                         {notice.category || '전체'}
                       </span>
+                      {notice.imageUrl && (
+                        <span style={styles.imageBadge}>
+                          <Image size={12} />
+                          이미지
+                        </span>
+                      )}
                       <span style={styles.noticeDate}>
                         {formatDate(notice.createdAt)}
                       </span>
@@ -456,6 +571,51 @@ const styles = {
     boxSizing: 'border-box',
     fontFamily: 'inherit',
   },
+  // 이미지 업로드 스타일
+  imageUploadArea: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '30px',
+    border: '2px dashed #ddd',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    transition: 'border-color 0.2s',
+  },
+  uploadText: {
+    marginTop: '8px',
+    fontSize: '14px',
+    color: '#666',
+  },
+  uploadHint: {
+    marginTop: '4px',
+    fontSize: '12px',
+    color: '#999',
+  },
+  imagePreviewContainer: {
+    position: 'relative',
+  },
+  imagePreview: {
+    width: '100%',
+    maxHeight: '300px',
+    objectFit: 'contain',
+    borderRadius: '8px',
+    border: '1px solid #eee',
+  },
+  removeImageBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    marginTop: '8px',
+    padding: '8px 12px',
+    backgroundColor: '#f5f5f5',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '13px',
+    color: '#666',
+    cursor: 'pointer',
+  },
   formActions: {
     display: 'flex',
     justifyContent: 'flex-end',
@@ -529,8 +689,16 @@ const styles = {
   },
   noticeMain: {
     display: 'flex',
-    justifyContent: 'space-between',
     alignItems: 'flex-start',
+    gap: '16px',
+  },
+  noticeThumbnail: {
+    width: '80px',
+    height: '80px',
+    objectFit: 'cover',
+    borderRadius: '8px',
+    border: '1px solid #eee',
+    flexShrink: 0,
   },
   noticeInfo: {
     flex: 1,
@@ -540,12 +708,23 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     marginBottom: '8px',
+    flexWrap: 'wrap',
   },
   categoryBadge: {
     padding: '4px 10px',
     borderRadius: '4px',
     fontSize: '12px',
     fontWeight: '600',
+  },
+  imageBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    padding: '2px 8px',
+    backgroundColor: '#E8F4FF',
+    borderRadius: '4px',
+    fontSize: '11px',
+    color: '#4A90D9',
   },
   noticeDate: {
     fontSize: '12px',
@@ -569,11 +748,16 @@ const styles = {
     color: '#666',
     lineHeight: '1.5',
     whiteSpace: 'pre-wrap',
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
   },
   noticeActions: {
     display: 'flex',
+    flexDirection: 'column',
     gap: '8px',
-    marginLeft: '16px',
+    marginLeft: 'auto',
   },
   actionBtn: {
     background: 'none',
