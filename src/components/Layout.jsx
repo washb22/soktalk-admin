@@ -8,7 +8,8 @@ import {
   MessageSquare, 
   AlertTriangle,
   LogOut,
-  BarChart3  // ✅ 추가
+  BarChart3,
+  Megaphone
 } from 'lucide-react';
 
 const menuItems = [
@@ -16,9 +17,10 @@ const menuItems = [
   { path: '/users', icon: Users, label: '회원 관리' },
   { path: '/posts', icon: FileText, label: '게시글 관리' },
   { path: '/write', icon: PenSquare, label: '글 작성' },
+  { path: '/notices', icon: Megaphone, label: '공지사항' },
   { path: '/comments', icon: MessageSquare, label: '댓글 관리' },
   { path: '/reports', icon: AlertTriangle, label: '신고 관리' },
-  { path: '/usage', icon: BarChart3, label: '사용 현황' },  // ✅ 추가
+  { path: '/usage', icon: BarChart3, label: '사용 현황' },
 ];
 
 function Layout({ children, onLogout }) {

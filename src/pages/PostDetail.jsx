@@ -222,6 +222,56 @@ function PostDetail() {
     setCommentAuthor(`${adj}${noun}${num}`);
   };
 
+  // ✅ 푸시 알림 전송 함수 (Vercel API 사용)
+  const sendPushNotification = async (commenterName, commentText) => {
+    // 게시글 작성자에게 알림 전송
+    if (!post.authorId) {
+      console.log('게시글 작성자 ID가 없습니다.');
+      return;
+    }
+
+    try {
+      // 게시글 작성자의 pushToken 가져오기
+      const userRef = doc(db, 'users', post.authorId);
+      const userSnap = await getDoc(userRef);
+
+      if (!userSnap.exists()) {
+        console.log('사용자를 찾을 수 없습니다.');
+        return;
+      }
+
+      const pushToken = userSnap.data().pushToken;
+
+      if (!pushToken) {
+        console.log('푸시 토큰이 없습니다.');
+        return;
+      }
+
+      // Vercel API를 통해 알림 전송 (CORS 우회)
+      const response = await fetch('https://soktalk.vercel.app/api/push-notification', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pushToken: pushToken,
+          title: '새 댓글 💬',
+          body: `${commenterName}님이 "${post.title}"에 댓글을 남겼습니다.`,
+          data: {
+            type: 'comment',
+            postId: postId,
+            screen: 'PostDetail'
+          },
+        }),
+      });
+
+      const result = await response.json();
+      console.log('✅ 관리자 댓글 알림 전송 완료:', result);
+    } catch (error) {
+      console.error('❌ 알림 전송 에러:', error);
+    }
+  };
+
   const generateRandomReplyName = () => {
     const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
     const noun = nouns[Math.floor(Math.random() * nouns.length)];
@@ -251,14 +301,19 @@ function PostDetail() {
         isAdminComment: true,
       };
 
-      const docRef = await addDoc(collection(db, 'posts', postId, 'comments'), commentData);
+      await addDoc(collection(db, 'posts', postId, 'comments'), commentData);
       
       // 댓글 수 업데이트
       await updateDoc(doc(db, 'posts', postId), {
         commentsCount: comments.length + 1
       });
 
-      setComments([...comments, { id: docRef.id, ...commentData }]);
+      // ✅ 푸시 알림 전송
+      const displayName = isAnonymous ? '익명' : commentAuthor;
+      await sendPushNotification(displayName, newComment.trim());
+
+      // 댓글 다시 로드 (중복 방지)
+      await loadPostAndComments();
       setNewComment('');
       alert('댓글이 등록되었습니다.');
     } catch (error) {
@@ -313,14 +368,19 @@ function PostDetail() {
         replyTo: replyingTo.authorName,
       };
 
-      const docRef = await addDoc(collection(db, 'posts', postId, 'comments'), replyData);
+      await addDoc(collection(db, 'posts', postId, 'comments'), replyData);
       
       // 댓글 수 업데이트
       await updateDoc(doc(db, 'posts', postId), {
         commentsCount: comments.length + 1
       });
 
-      setComments([...comments, { id: docRef.id, ...replyData }]);
+      // ✅ 푸시 알림 전송
+      const displayName = isReplyAnonymous ? '익명' : replyAuthor;
+      await sendPushNotification(displayName, replyText.trim());
+
+      // 댓글 다시 로드 (중복 방지)
+      await loadPostAndComments();
       setReplyText('');
       setReplyingTo(null);
       alert('대댓글이 등록되었습니다.');
@@ -345,57 +405,50 @@ function PostDetail() {
 
   // 댓글 정렬: 트리 구조로 정렬 (무한 깊이 대댓글 지원)
   const organizeComments = () => {
-    // 각 댓글의 깊이를 계산
-    const getDepth = (comment, allComments, depth = 0) => {
-      if (!comment.parentCommentId) return 0;
-      const parent = allComments.find(c => c.id === comment.parentCommentId);
-      if (!parent) return depth + 1;
-      return getDepth(parent, allComments, depth + 1);
-    };
-
-    // 댓글에 깊이 정보 추가
-    const commentsWithDepth = comments.map(c => ({
-      ...c,
-      depth: getDepth(c, comments)
-    }));
-
-    // 원댓글들 (depth 0)
-    const rootComments = commentsWithDepth.filter(c => c.depth === 0);
+    // 이미 추가된 댓글 ID 추적 (중복 방지)
+    const addedIds = new Set();
+    const result = [];
     
-    // 재귀적으로 자식 댓글 찾기
+    // 자식 댓글 찾기
     const getChildren = (parentId) => {
-      return commentsWithDepth
-        .filter(c => c.parentCommentId === parentId)
+      return comments
+        .filter(c => c.parentCommentId === parentId && !addedIds.has(c.id))
         .sort((a, b) => {
           const aTime = a.createdAt?.toDate?.() || a.createdAt || new Date(0);
           const bTime = b.createdAt?.toDate?.() || b.createdAt || new Date(0);
           return aTime - bTime;
         });
     };
-
-    // 트리 구조로 정렬
-    const organized = [];
-    const addWithChildren = (comment) => {
-      organized.push(comment);
+    
+    // 재귀적으로 댓글과 자식들 추가
+    const addWithChildren = (comment, depth) => {
+      if (addedIds.has(comment.id)) return; // 중복 방지
+      addedIds.add(comment.id);
+      result.push({ ...comment, depth });
+      
       const children = getChildren(comment.id);
-      children.forEach(child => addWithChildren(child));
+      children.forEach(child => addWithChildren(child, depth + 1));
     };
-
-    rootComments
+    
+    // 원댓글들 (parentCommentId가 없는 것들)
+    const rootComments = comments
+      .filter(c => !c.parentCommentId)
       .sort((a, b) => {
         const aTime = a.createdAt?.toDate?.() || a.createdAt || new Date(0);
         const bTime = b.createdAt?.toDate?.() || b.createdAt || new Date(0);
         return aTime - bTime;
-      })
-      .forEach(root => addWithChildren(root));
-
-    // 부모가 삭제된 고아 댓글 추가
-    const organizedIds = new Set(organized.map(c => c.id));
-    commentsWithDepth
-      .filter(c => !organizedIds.has(c.id))
-      .forEach(orphan => organized.push({ ...orphan, depth: 0 }));
+      });
     
-    return organized;
+    rootComments.forEach(root => addWithChildren(root, 0));
+    
+    // 고아 댓글들 추가 (부모가 삭제된 경우)
+    comments.forEach(c => {
+      if (!addedIds.has(c.id)) {
+        result.push({ ...c, depth: 0 });
+      }
+    });
+    
+    return result;
   };
 
   if (loading) {
