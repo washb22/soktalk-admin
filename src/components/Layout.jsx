@@ -9,7 +9,8 @@ import {
   AlertTriangle,
   LogOut,
   BarChart3,
-  Megaphone
+  Megaphone,
+  Bell
 } from 'lucide-react';
 
 const menuItems = [
@@ -18,6 +19,7 @@ const menuItems = [
   { path: '/posts', icon: FileText, label: '게시글 관리' },
   { path: '/write', icon: PenSquare, label: '글 작성' },
   { path: '/notices', icon: Megaphone, label: '공지사항' },
+  { path: '/push', icon: Bell, label: '푸시 알림' },
   { path: '/comments', icon: MessageSquare, label: '댓글 관리' },
   { path: '/reports', icon: AlertTriangle, label: '신고 관리' },
   { path: '/usage', icon: BarChart3, label: '사용 현황' },

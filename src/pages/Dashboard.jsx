@@ -1,7 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
-import { Users, FileText, MessageSquare, Heart, TrendingUp, Calendar } from 'lucide-react';
+import { 
+  collection, 
+  getDocs, 
+  query, 
+  where, 
+  orderBy, 
+  limit,
+  getCountFromServer,
+  Timestamp
+} from 'firebase/firestore';
+import { Users, FileText, MessageSquare, TrendingUp, Calendar } from 'lucide-react';
 
 function Dashboard() {
   const [stats, setStats] = useState({
@@ -22,68 +31,79 @@ function Dashboard() {
 
   const loadDashboardData = async () => {
     try {
-      // 전체 통계
-      const usersSnapshot = await getDocs(collection(db, 'users'));
-      const postsSnapshot = await getDocs(collection(db, 'posts'));
-      const reportsSnapshot = await getDocs(collection(db, 'reports'));
-
-      // 댓글 수 계산 (각 게시글의 comments 서브컬렉션)
-      let totalComments = 0;
-      for (const postDoc of postsSnapshot.docs) {
-        const commentsSnapshot = await getDocs(collection(db, 'posts', postDoc.id, 'comments'));
-        totalComments += commentsSnapshot.size;
-      }
-
-      // 오늘 날짜
+      // 오늘 자정 타임스탬프
       const today = new Date();
       today.setHours(0, 0, 0, 0);
+      const todayTimestamp = Timestamp.fromDate(today);
 
-      // 오늘 가입자
-      let todayUsers = 0;
-      usersSnapshot.docs.forEach(doc => {
+      // ✅ 병렬로 카운트 조회 (getCountFromServer - 문서 내용 안 읽음)
+      const [
+        usersCountSnap,
+        postsCountSnap,
+        reportsCountSnap,
+        todayUsersCountSnap,
+        todayPostsCountSnap,
+        recentPostsSnapshot,
+        recentUsersSnapshot,
+        allPostsSnapshot  // 댓글 수 합산용
+      ] = await Promise.all([
+        // 전체 카운트
+        getCountFromServer(collection(db, 'users')),
+        getCountFromServer(collection(db, 'posts')),
+        getCountFromServer(collection(db, 'reports')),
+        
+        // 오늘 가입자 카운트
+        getCountFromServer(
+          query(collection(db, 'users'), where('createdAt', '>=', todayTimestamp))
+        ),
+        
+        // 오늘 게시글 카운트
+        getCountFromServer(
+          query(collection(db, 'posts'), where('createdAt', '>=', todayTimestamp))
+        ),
+        
+        // 최근 게시글 5개
+        getDocs(query(
+          collection(db, 'posts'),
+          orderBy('createdAt', 'desc'),
+          limit(5)
+        )),
+        
+        // 최근 가입자 5개
+        getDocs(query(
+          collection(db, 'users'),
+          orderBy('createdAt', 'desc'),
+          limit(5)
+        )),
+        
+        // 댓글 수 합산용 (commentsCount 필드만 사용)
+        getDocs(collection(db, 'posts'))
+      ]);
+
+      // 📝 댓글 수: 각 게시글의 commentsCount 필드 합산 (서브컬렉션 127번 조회 안 함!)
+      let totalComments = 0;
+      allPostsSnapshot.docs.forEach(doc => {
         const data = doc.data();
-        if (data.createdAt?.toDate && data.createdAt.toDate() >= today) {
-          todayUsers++;
-        }
+        totalComments += data.commentsCount || 0;
       });
 
-      // 오늘 게시글
-      let todayPosts = 0;
-      postsSnapshot.docs.forEach(doc => {
-        const data = doc.data();
-        if (data.createdAt?.toDate && data.createdAt.toDate() >= today) {
-          todayPosts++;
-        }
-      });
-
+      // 통계 설정
       setStats({
-        totalUsers: usersSnapshot.size,
-        totalPosts: postsSnapshot.size,
+        totalUsers: usersCountSnap.data().count,
+        totalPosts: postsCountSnap.data().count,
         totalComments,
-        totalReports: reportsSnapshot.size,
-        todayUsers,
-        todayPosts,
+        totalReports: reportsCountSnap.data().count,
+        todayUsers: todayUsersCountSnap.data().count,
+        todayPosts: todayPostsCountSnap.data().count,
       });
 
       // 최근 게시글
-      const recentPostsQuery = query(
-        collection(db, 'posts'),
-        orderBy('createdAt', 'desc'),
-        limit(5)
-      );
-      const recentPostsSnapshot = await getDocs(recentPostsQuery);
       setRecentPosts(recentPostsSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })));
 
       // 최근 가입자
-      const recentUsersQuery = query(
-        collection(db, 'users'),
-        orderBy('createdAt', 'desc'),
-        limit(5)
-      );
-      const recentUsersSnapshot = await getDocs(recentUsersQuery);
       setRecentUsers(recentUsersSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()

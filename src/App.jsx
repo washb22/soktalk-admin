@@ -11,6 +11,7 @@ import Comments from './pages/Comments';
 import Reports from './pages/Reports';
 import Usage from './pages/Usage';  // ✅ 추가
 import Notices from './pages/Notices';
+import PushNotifications from './pages/PushNotifications';
 
 const ADMIN_PASSWORD = 'thrxhr1234';
 
@@ -56,6 +57,7 @@ function App() {
           <Route path="/usage" element={<Usage />} />  {/* ✅ 추가 */}
           <Route path="*" element={<Navigate to="/" />} />
           <Route path="/notices" element={<Notices />} />
+          <Route path="/push" element={<PushNotifications />} />
         </Routes>
       </Layout>
     </BrowserRouter>
