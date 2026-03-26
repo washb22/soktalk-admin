@@ -89,27 +89,28 @@ function toFirestoreValue(val) {
   return { stringValue: String(val) };
 }
 
-async function callGPT(systemPrompt, userPrompt) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('OpenAI API key not found');
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+async function callLLM(systemPrompt, userPrompt) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('Anthropic API key not found');
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 300,
+      temperature: 0.3,
+      system: systemPrompt,
       messages: [
-        { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      temperature: 0.3,
-      max_tokens: 300,
     }),
   });
   const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() || '';
+  return data.content?.[0]?.text?.trim() || '';
 }
 
 export default async function handler(req, res) {
@@ -153,45 +154,32 @@ export default async function handler(req, res) {
     // 2. 각 게시글의 봇 댓글 찾아서 변환
     for (const postId of posts) {
       try {
-        // 해당 글의 댓글 서브컬렉션 조회
-        const commentsRes = await fetch(`${FIRESTORE_BASE}:runQuery`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            structuredQuery: {
-              from: [{ collectionId: 'comments', allDescendants: true }],
-              where: {
-                fieldFilter: {
-                  field: { fieldPath: 'userId' },
-                  op: 'GREATER_THAN_OR_EQUAL',
-                  value: { stringValue: 'bot_' },
-                },
-              },
-              limit: 1000,
-            },
-          }),
-        });
-        const commentsData = await commentsRes.json();
-        const botComments = (commentsData || [])
-          .filter(item => item.document)
-          .filter(item => {
-            const userId = item.document.fields?.userId?.stringValue || '';
-            return userId.startsWith('bot_');
-          });
+        // 해당 글의 댓글 서브컬렉션 직접 조회
+        const listRes = await fetch(
+          `${FIRESTORE_BASE}/posts/${postId}/comments?pageSize=100`,
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          }
+        );
+        const listData = await listRes.json();
+        const allComments = listData.documents || [];
 
-        for (const item of botComments) {
-          const docPath = item.document.name.replace(
+        // bot_ 으로 시작하는 userId만 필터
+        const botComments = allComments.filter(doc => {
+          const userId = doc.fields?.userId?.stringValue || '';
+          return userId.startsWith('bot_');
+        });
+
+        for (const doc of botComments) {
+          const docPath = doc.name.replace(
             `projects/${PROJECT_ID}/databases/(default)/documents/`,
             ''
           );
-          const oldText = item.document.fields?.text?.stringValue || '';
+          const oldText = doc.fields?.text?.stringValue || '';
           if (!oldText) { results.skipped++; continue; }
 
-          // GPT로 존댓말 변환
-          const newText = await callGPT(
+          // Claude로 존댓말 변환
+          const newText = await callLLM(
             `너는 텍스트 말투 변환기야. 반말로 된 댓글을 존댓말(~요 체)로 자연스럽게 바꿔줘.
 규칙:
 - 10대 느낌은 유지하면서 존댓말로 변환
@@ -228,8 +216,6 @@ export default async function handler(req, res) {
         results.errors.push({ postId, error: err.message });
       }
     }
-
-    // 중복 조회 방지를 위해 break (allDescendants로 한번에 가져옴)
     return res.status(200).json({
       success: true,
       summary: results,

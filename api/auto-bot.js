@@ -201,30 +201,31 @@ function randomUserId() {
   return `bot_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 }
 
-// ── GPT 호출 ──
-async function callGPT(systemPrompt, userPrompt) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('OpenAI API key not found');
+// ── Claude API 호출 ──
+async function callLLM(systemPrompt, userPrompt) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('Anthropic API key not found');
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 300,
+      temperature: 0.9,
+      system: systemPrompt,
       messages: [
-        { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      temperature: 0.9,
-      max_tokens: 300,
     }),
   });
 
   const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() || '';
+  return data.content?.[0]?.text?.trim() || '';
 }
 
 // ── 댓글 생성 ──
@@ -255,7 +256,7 @@ async function generateComment(postTitle, postContent, postCategory) {
 
   const userPrompt = `[${postCategory}] "${postTitle}"\n\n${postContent}\n\n위 글에 10대가 쓸법한 자연스러운 댓글 1개만. 댓글 내용만 출력해.`;
 
-  return await callGPT(systemPrompt, userPrompt);
+  return await callLLM(systemPrompt, userPrompt);
 }
 
 // ── 새 글 생성 ──
@@ -343,7 +344,7 @@ JSON 형식으로만 출력: {"title": "제목", "content": "본문"}`;
 실제 10대 학생이 폰으로 빠르게 쓴 것처럼 자연스럽게.
 JSON으로만 출력해.${avoidList}`;
 
-  const result = await callGPT(systemPrompt, userPrompt);
+  const result = await callLLM(systemPrompt, userPrompt);
 
   try {
     const cleaned = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
