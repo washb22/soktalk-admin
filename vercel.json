@@ -1,5 +1,11 @@
 {
   "rewrites": [
     { "source": "/(.*)", "destination": "/" }
+  ],
+  "crons": [
+    {
+      "path": "/api/auto-bot",
+      "schedule": "0 9 * * *"
+    }
   ]
 }
