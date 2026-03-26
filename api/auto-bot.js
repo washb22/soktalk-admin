@@ -1,7 +1,41 @@
 // api/auto-bot.js - 자동 댓글 & 글 작성 봇
 // Vercel Cron으로 하루 1회 실행
 // firebase-admin 대신 Firestore REST API 직접 사용 (의존성 제로)
-import { createSign } from 'crypto';
+
+// ── Base64URL 인코딩 ──
+function base64url(data) {
+  const str = typeof data === 'string' ? data : JSON.stringify(data);
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64urlFromBuffer(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// PEM → CryptoKey 변환
+async function importPrivateKey(pem) {
+  const pemContents = pem
+    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+    .replace(/-----END PRIVATE KEY-----/g, '')
+    .replace(/\s/g, '');
+  const binaryStr = atob(pemContents);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  return await crypto.subtle.importKey(
+    'pkcs8',
+    bytes.buffer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+}
 
 // ── Google OAuth2 토큰 발급 (서비스 계정) ──
 async function getAccessToken() {
@@ -23,14 +57,14 @@ async function getAccessToken() {
     exp: now + 3600,
   };
 
-  const encode = (obj) =>
-    Buffer.from(JSON.stringify(obj)).toString('base64url');
-
-  const unsignedToken = `${encode(header)}.${encode(payload)}`;
-  const sign = createSign('RSA-SHA256');
-  sign.update(unsignedToken);
-  const signature = sign.sign(privateKey, 'base64url');
-  const jwt = `${unsignedToken}.${signature}`;
+  const unsignedToken = `${base64url(header)}.${base64url(payload)}`;
+  const key = await importPrivateKey(privateKey);
+  const signatureBuffer = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    key,
+    new TextEncoder().encode(unsignedToken)
+  );
+  const jwt = `${unsignedToken}.${base64urlFromBuffer(signatureBuffer)}`;
 
   // JWT로 액세스 토큰 교환
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -224,7 +258,7 @@ async function generateComment(postTitle, postContent, postCategory) {
 }
 
 // ── 새 글 생성 ──
-async function generatePost(category) {
+async function generatePost(category, existingTitles = []) {
   const topicPool = category === '연애상담'
     ? [
         '짝남/짝녀 짝사랑 고민 (같은반, 같은학원, 선배, 후배)',
@@ -253,7 +287,17 @@ async function generatePost(category) {
         '학원/학교에서 있었던 웃긴 일',
       ];
 
-  const randomTopic = topicPool[Math.floor(Math.random() * topicPool.length)];
+  // 이미 사용된 주제 피하기 (제목에서 키워드 추출)
+  let availableTopics = [...topicPool];
+  if (existingTitles.length > 0) {
+    const usedKeywords = existingTitles.join(' ');
+    availableTopics = topicPool.filter(topic => {
+      const mainKeyword = topic.split(' ')[0].replace(/[/()]/g, '');
+      return !usedKeywords.includes(mainKeyword);
+    });
+    if (availableTopics.length === 0) availableTopics = [...topicPool];
+  }
+  const randomTopic = availableTopics[Math.floor(Math.random() * availableTopics.length)];
 
   const systemPrompt = `너는 한국 10대(중학생~고등학생)야. "마음다락방"이라는 연애/일상 고민 앱에 글을 쓰는 일반 사용자야.
 
@@ -289,10 +333,14 @@ async function generatePost(category) {
 
 JSON 형식으로만 출력: {"title": "제목", "content": "본문"}`;
 
+  const avoidList = existingTitles.length > 0
+    ? `\n\n[중복 금지] 아래 제목들과 비슷한 주제/제목은 절대 쓰지 마:\n${existingTitles.map(t => `- "${t}"`).join('\n')}`
+    : '';
+
   const userPrompt = `주제: "${randomTopic}"
 "${category}" 카테고리에 올릴 글을 하나 작성해줘.
 실제 10대 학생이 폰으로 빠르게 쓴 것처럼 자연스럽게.
-JSON으로만 출력해.`;
+JSON으로만 출력해.${avoidList}`;
 
   const result = await callGPT(systemPrompt, userPrompt);
 
@@ -422,9 +470,10 @@ export default async function handler(req, res) {
     ];
 
     for (const { category, count } of postPlan) {
+      const createdTitles = [];
       for (let i = 0; i < count; i++) {
         try {
-          const postContent = await generatePost(category);
+          const postContent = await generatePost(category, createdTitles);
           if (!postContent || !postContent.title || !postContent.content) continue;
 
           const now = new Date();
@@ -449,6 +498,7 @@ export default async function handler(req, res) {
           const docRef = await firestoreAdd(accessToken, 'posts', postData);
           const docId = docRef.name ? docRef.name.split('/').pop() : 'unknown';
 
+          createdTitles.push(postContent.title);
           results.posts.push({
             id: docId,
             title: postContent.title,
