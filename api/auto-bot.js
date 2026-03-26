@@ -531,7 +531,9 @@ export default async function handler(req, res) {
           results.posts.push({
             id: docId,
             title: postContent.title,
+            content: postContent.content,
             category,
+            createdAt: spreadTime,
           });
         } catch (err) {
           results.errors.push({ type: 'post', category, error: err.message });
@@ -542,34 +544,18 @@ export default async function handler(req, res) {
     // ─── 3. 방금 생성한 글에 댓글 1~2개씩 달기 ───
     for (const posted of results.posts) {
       try {
-        const commentCount = Math.random() < 0.5 ? 1 : 2; // 1~2개 랜덤
+        const commentCount = Math.random() < 0.5 ? 1 : 2;
         for (let c = 0; c < commentCount; c++) {
-          const post = await firestoreQuery(accessToken, {
-            from: [{ collectionId: 'posts' }],
-            orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }],
-            limit: 1,
-            where: {
-              fieldFilter: {
-                field: { fieldPath: '__name__' },
-                op: 'EQUAL',
-                value: { referenceValue: `projects/${PROJECT_ID}/databases/(default)/documents/posts/${posted.id}` },
-              },
-            },
-          });
-
-          const postDoc = post[0];
-          if (!postDoc) continue;
-
           const commentText = await generateComment(
-            postDoc.title || '',
-            ((postDoc.content || '') + '').substring(0, 500),
-            postDoc.category || '연애상담'
+            posted.title || '',
+            ((posted.content || '') + '').substring(0, 500),
+            posted.category || '연애상담'
           );
 
           if (!commentText) continue;
 
           // 댓글 시간을 글 작성 시간 이후 랜덤(10분~3시간)으로 설정
-          const postTime = postDoc.createdAt instanceof Date ? postDoc.createdAt.getTime() : Date.now();
+          const postTime = posted.createdAt instanceof Date ? posted.createdAt.getTime() : Date.now();
           const delayMs = (Math.floor(Math.random() * 170) + 10) * 60 * 1000;
           const commentTime = new Date(postTime + delayMs);
 
@@ -584,10 +570,8 @@ export default async function handler(req, res) {
           };
 
           await firestoreAdd(accessToken, `posts/${posted.id}/comments`, commentData);
-
-          const newCount = (postDoc.commentsCount || 0) + c + 1;
           await firestoreUpdate(accessToken, `posts/${posted.id}`, {
-            commentsCount: newCount,
+            commentsCount: c + 1,
           });
 
           results.comments.push({
