@@ -1,6 +1,7 @@
 // api/auto-bot.js - 자동 댓글 & 글 작성 봇
 // Vercel Cron으로 하루 1회 실행
 // firebase-admin 대신 Firestore REST API 직접 사용 (의존성 제로)
+import { createSign } from 'crypto';
 
 // ── Google OAuth2 토큰 발급 (서비스 계정) ──
 async function getAccessToken() {
@@ -21,8 +22,6 @@ async function getAccessToken() {
     iat: now,
     exp: now + 3600,
   };
-
-  const { createSign } = await import('crypto');
 
   const encode = (obj) =>
     Buffer.from(JSON.stringify(obj)).toString('base64url');
