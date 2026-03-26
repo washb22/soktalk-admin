@@ -39,42 +39,18 @@ export default async function handler(req, res) {
   try {
     const accessToken = await getAccessToken();
 
-    // 댓글 0개인 글
-    const noCommentPosts = await firestoreQuery(accessToken, {
+    // 전체 글 가져온 뒤 댓글 적은 글 필터링 (commentsCount 필드가 없는 글도 포함)
+    const allPostsRaw = await firestoreQuery(accessToken, {
       from: [{ collectionId: 'posts' }],
-      where: {
-        fieldFilter: {
-          field: { fieldPath: 'commentsCount' },
-          op: 'EQUAL',
-          value: { integerValue: '0' },
-        },
-      },
       orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }],
-      limit: 200,
+      limit: 500,
     });
 
-    // 댓글 1~2개인 글
-    const fewCommentsPosts = await firestoreQuery(accessToken, {
-      from: [{ collectionId: 'posts' }],
-      where: {
-        compositeFilter: {
-          op: 'AND',
-          filters: [
-            { fieldFilter: { field: { fieldPath: 'commentsCount' }, op: 'GREATER_THAN_OR_EQUAL', value: { integerValue: '1' } } },
-            { fieldFilter: { field: { fieldPath: 'commentsCount' }, op: 'LESS_THAN_OR_EQUAL', value: { integerValue: '2' } } },
-          ],
-        },
-      },
-      orderBy: [{ field: { fieldPath: 'commentsCount' }, direction: 'ASCENDING' }],
-      limit: 100,
+    // commentsCount가 없거나 0~2인 글만 필터
+    const allPosts = allPostsRaw.filter(p => {
+      const count = p.commentsCount;
+      return count === undefined || count === null || count <= 2;
     });
-
-    // 중복 제거
-    const allPosts = [];
-    const seenIds = new Set();
-    for (const p of [...noCommentPosts, ...fewCommentsPosts]) {
-      if (!seenIds.has(p._id)) { seenIds.add(p._id); allPosts.push(p); }
-    }
 
     for (const post of allPosts) {
       try {
