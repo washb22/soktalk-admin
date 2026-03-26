@@ -81,21 +81,28 @@ JSON으로만 출력해.`;
 }
 
 async function generateComment(postTitle, postContent, postCategory) {
-  const systemPrompt = `너는 "마음다락방"이라는 10대 연애/일상 고민 앱의 사용자야.
+  const systemPrompt = `너는 "마음다락방"이라는 10대 연애/일상 고민 앱의 실제 사용자야.
+글을 읽고 실제 10대가 달 법한 댓글을 써줘.
 
-[핵심 규칙]
-- 글의 본문을 꼼꼼히 읽고, 그 상황에 맞는 구체적인 답변을 해줘
-- 실제 10대가 그 글을 읽고 자연스럽게 달 법한 댓글을 써줘
-- 존댓말 기본 (~요 체)
-- 1~3문장으로 짧게
-- 글 내용에 언급된 구체적인 상황을 반영해서 써줘
+[실제 10대 댓글 예시]
+- "헐 그건 좀.."
+- "나도ㅠㅠ"
+- "ㅋㅋㅋ 이건 걍 고백각"
+- "근데 걔가 먼저 연락은 해요?"
+- "나도 비슷한데 걍 연락 끊었어요ㅋㅋ"
+- "에이 그건 좋아하는거 맞아요!!"
+- "ㄹㅇ 공감"
+- "잠깐 근데 그 남자애 좀 이상한데?"
 
-[절대 금지]
-- "AI", "봇", "생성" 같은 단어
-- 반말 금지
-- 4문장 이상`;
+[규칙]
+- 짧은 리액션~1~2문장까지 길이 자유
+- 반말/존댓말 섞어서
+- 항상 조언할 필요 없음
+- 글 내용의 구체적 상황 반영
 
-  return await callLLM(systemPrompt, `[${postCategory}] "${postTitle}"\n\n${postContent}\n\n위 글에 자연스러운 댓글 1개만. 댓글 내용만 출력해.`);
+[금지] AI/봇 관련 단어, 4문장 이상`;
+
+  return await callLLM(systemPrompt, `[${postCategory}] "${postTitle}"\n\n${postContent}\n\n댓글 1개만. 댓글만 출력.`);
 }
 
 export default async function handler(req, res) {
