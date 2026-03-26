@@ -228,33 +228,56 @@ async function callLLM(systemPrompt, userPrompt) {
   return data.content?.[0]?.text?.trim() || '';
 }
 
+// ── 랜덤 페르소나 & 댓글 유형 ──
+const personas = [
+  { gender: '여자', age: '중2', trait: '밝고 텐션 높은 성격, 이모티콘을 많이 씀' },
+  { gender: '여자', age: '중3', trait: '조용하고 진지한 성격, 공감을 잘 해줌' },
+  { gender: '여자', age: '고1', trait: '언니/오빠 같은 성격, 조언을 잘 해줌' },
+  { gender: '여자', age: '고2', trait: '쿨하고 직설적인 성격, 단답 스타일' },
+  { gender: '남자', age: '중2', trait: '장난기 많고 유머러스한 성격' },
+  { gender: '남자', age: '중3', trait: '진중하고 따뜻한 성격' },
+  { gender: '남자', age: '고1', trait: '솔직하고 현실적인 조언을 해줌' },
+  { gender: '남자', age: '고2', trait: '무심한 듯 다정한 성격, 짧게 핵심만 말함' },
+  { gender: '여자', age: '고1', trait: '수다스럽고 공감력 높은 성격, ~거든요 를 자주 씀' },
+  { gender: '남자', age: '고1', trait: '형/오빠처럼 든든한 조언 스타일' },
+];
+
+const commentTypes = [
+  { type: '공감형', desc: '글쓴이의 감정에 깊이 공감하며 "저도 그런 적 있어요" 스타일로 써줘' },
+  { type: '조언형', desc: '"저같으면 이렇게 할 것 같아요" 스타일로 구체적 조언을 해줘' },
+  { type: '응원형', desc: '걱정하지 말라고 따뜻하게 응원해줘' },
+  { type: '경험공유형', desc: '본인의 비슷한 경험을 짧게 들려주며 공감해줘' },
+  { type: '질문형', desc: '글 내용에 대해 궁금한 점을 물어보며 대화를 이어가줘' },
+  { type: '리액션형', desc: '"헐 진짜요??" 같은 리액션 위주로 짧게 반응해줘' },
+];
+
 // ── 댓글 생성 ──
 async function generateComment(postTitle, postContent, postCategory) {
-  const systemPrompt = `너는 한국 10대(중학생~고등학생) 여자/남자야. "마음다락방"이라는 연애/일상 고민 앱에서 활동하는 일반 사용자야.
-다른 10대의 고민 글을 읽고 공감하는 댓글을 달아줘.
+  const persona = personas[Math.floor(Math.random() * personas.length)];
+  const commentType = commentTypes[Math.floor(Math.random() * commentTypes.length)];
 
-[말투 규칙 - 존댓말 기반]
-- 존댓말 기본 (~같아요, ~거든요, ~해봐요, ~인 것 같아요, ~하세요, ~좋을 것 같아요)
-- 10대 느낌의 부드러운 존댓말 (~요 체)
-- 맞춤법 가끔 틀려도 됨 (했는데→햇는데, 됐는데→됫는데, 거든요→거등요)
-- 줄임말/신조어 적당히 사용: ㄹㅇ, 진짜, 걍, 찐, 인정, 공감
-- 이모티콘: ㅠㅠ, ㅜㅜ, ㅋㅋ, ㅋㅋㅋ, 😭, 🥺, !!
-- 1~3문장으로 짧게
+  const systemPrompt = `너는 한국 ${persona.age} ${persona.gender}야. "마음다락방"이라는 연애/일상 고민 앱에서 활동하는 일반 사용자야.
+너의 성격: ${persona.trait}
 
-[댓글 유형 - 랜덤하게 섞어서]
-- 공감형: "아 진짜 저도 겪어봐서 아는데 ㅠㅠ 힘드시겠어요"
-- 조언형: "저같으면 걍 솔직하게 말할 것 같아요!"
-- 응원형: "힘내세요!! 잘될거예요 진짜"
-- 경험 공유형: "저도 비슷한 적 있었는데요~"
-- 질문형: "근데 그 사람이 먼저 연락은 해요?"
+다른 10대의 고민 글을 읽고 댓글을 달아줘.
+
+[이번 댓글 스타일: ${commentType.type}]
+${commentType.desc}
+
+[말투 규칙]
+- 존댓말 기본 (~같아요, ~거든요, ~해봐요, ~인 것 같아요)
+- 너의 성격에 맞는 자연스러운 말투로
+- 이모티콘은 너의 성격에 따라 많이 쓰거나 적게 쓰거나 자유롭게
+- 1~3문장으로 짧게 (긴 댓글 금지)
+- 글의 구체적인 상황에 맞춰서 댓글을 써야 해 (뻔한 말 금지)
 
 [절대 금지]
 - "AI", "봇", "생성" 같은 단어
-- 어른스러운 말투, 조언가 느낌
-- 반말 사용 금지 (반드시 존댓말로)
-- 너무 길게 쓰기 (4문장 이상 금지)`;
+- 반말 사용 금지
+- 다른 댓글과 비슷한 패턴 반복 금지 ("아 진짜 저도~" 로 시작하는 패턴 등)
+- 4문장 이상 금지`;
 
-  const userPrompt = `[${postCategory}] "${postTitle}"\n\n${postContent}\n\n위 글에 10대가 쓸법한 자연스러운 댓글 1개만. 댓글 내용만 출력해.`;
+  const userPrompt = `[${postCategory}] "${postTitle}"\n\n${postContent}\n\n위 글에 ${persona.age} ${persona.gender} ${persona.trait} 사용자가 쓸법한 자연스러운 댓글 1개만. 댓글 내용만 출력해.`;
 
   return await callLLM(systemPrompt, userPrompt);
 }
@@ -379,9 +402,9 @@ export default async function handler(req, res) {
   try {
     const accessToken = await getAccessToken();
 
-    // ─── 1. 댓글 없는 글 찾아서 댓글 달기 ───
-    // 최신 글 (댓글 0개)
-    const recentNoPosts = await firestoreQuery(accessToken, {
+    // ─── 1. 댓글 적은 글 전부 찾아서 댓글 달기 ───
+    // 댓글 0개인 글 전부
+    const noCommentPosts = await firestoreQuery(accessToken, {
       from: [{ collectionId: 'posts' }],
       where: {
         fieldFilter: {
@@ -391,24 +414,10 @@ export default async function handler(req, res) {
         },
       },
       orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }],
-      limit: 15,
+      limit: 200,
     });
 
-    // 오래된 글도 포함 (댓글 0개, 오래된 순)
-    const oldNoPosts = await firestoreQuery(accessToken, {
-      from: [{ collectionId: 'posts' }],
-      where: {
-        fieldFilter: {
-          field: { fieldPath: 'commentsCount' },
-          op: 'EQUAL',
-          value: { integerValue: '0' },
-        },
-      },
-      orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'ASCENDING' }],
-      limit: 10,
-    });
-
-    // 댓글 적은 글도 추가 (1~2개인 글)
+    // 댓글 1~2개인 글도 포함
     const fewCommentsPosts = await firestoreQuery(accessToken, {
       from: [{ collectionId: 'posts' }],
       where: {
@@ -433,13 +442,13 @@ export default async function handler(req, res) {
         },
       },
       orderBy: [{ field: { fieldPath: 'commentsCount' }, direction: 'ASCENDING' }],
-      limit: 10,
+      limit: 100,
     });
 
     // 중복 제거하면서 합치기
     const allPosts = [];
     const seenIds = new Set();
-    for (const p of [...recentNoPosts, ...oldNoPosts, ...fewCommentsPosts]) {
+    for (const p of [...noCommentPosts, ...fewCommentsPosts]) {
       if (!seenIds.has(p._id)) {
         seenIds.add(p._id);
         allPosts.push(p);
