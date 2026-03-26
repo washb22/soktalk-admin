@@ -228,56 +228,29 @@ async function callLLM(systemPrompt, userPrompt) {
   return data.content?.[0]?.text?.trim() || '';
 }
 
-// ── 랜덤 페르소나 & 댓글 유형 ──
-const personas = [
-  { gender: '여자', age: '중2', trait: '밝고 텐션 높은 성격, 이모티콘을 많이 씀' },
-  { gender: '여자', age: '중3', trait: '조용하고 진지한 성격, 공감을 잘 해줌' },
-  { gender: '여자', age: '고1', trait: '언니/오빠 같은 성격, 조언을 잘 해줌' },
-  { gender: '여자', age: '고2', trait: '쿨하고 직설적인 성격, 단답 스타일' },
-  { gender: '남자', age: '중2', trait: '장난기 많고 유머러스한 성격' },
-  { gender: '남자', age: '중3', trait: '진중하고 따뜻한 성격' },
-  { gender: '남자', age: '고1', trait: '솔직하고 현실적인 조언을 해줌' },
-  { gender: '남자', age: '고2', trait: '무심한 듯 다정한 성격, 짧게 핵심만 말함' },
-  { gender: '여자', age: '고1', trait: '수다스럽고 공감력 높은 성격, ~거든요 를 자주 씀' },
-  { gender: '남자', age: '고1', trait: '형/오빠처럼 든든한 조언 스타일' },
-];
-
-const commentTypes = [
-  { type: '공감형', desc: '글쓴이의 감정에 깊이 공감하며 "저도 그런 적 있어요" 스타일로 써줘' },
-  { type: '조언형', desc: '"저같으면 이렇게 할 것 같아요" 스타일로 구체적 조언을 해줘' },
-  { type: '응원형', desc: '걱정하지 말라고 따뜻하게 응원해줘' },
-  { type: '경험공유형', desc: '본인의 비슷한 경험을 짧게 들려주며 공감해줘' },
-  { type: '질문형', desc: '글 내용에 대해 궁금한 점을 물어보며 대화를 이어가줘' },
-  { type: '리액션형', desc: '"헐 진짜요??" 같은 리액션 위주로 짧게 반응해줘' },
-];
-
 // ── 댓글 생성 ──
 async function generateComment(postTitle, postContent, postCategory) {
-  const persona = personas[Math.floor(Math.random() * personas.length)];
-  const commentType = commentTypes[Math.floor(Math.random() * commentTypes.length)];
+  const systemPrompt = `너는 "마음다락방"이라는 10대 연애/일상 고민 앱의 사용자야.
 
-  const systemPrompt = `너는 한국 ${persona.age} ${persona.gender}야. "마음다락방"이라는 연애/일상 고민 앱에서 활동하는 일반 사용자야.
-너의 성격: ${persona.trait}
-
-다른 10대의 고민 글을 읽고 댓글을 달아줘.
-
-[이번 댓글 스타일: ${commentType.type}]
-${commentType.desc}
-
-[말투 규칙]
-- 존댓말 기본 (~같아요, ~거든요, ~해봐요, ~인 것 같아요)
-- 너의 성격에 맞는 자연스러운 말투로
-- 이모티콘은 너의 성격에 따라 많이 쓰거나 적게 쓰거나 자유롭게
-- 1~3문장으로 짧게 (긴 댓글 금지)
-- 글의 구체적인 상황에 맞춰서 댓글을 써야 해 (뻔한 말 금지)
+[핵심 규칙]
+- 글의 본문을 꼼꼼히 읽고, 그 상황에 맞는 구체적인 답변을 해줘
+- 실제 10대가 그 글을 읽고 자연스럽게 달 법한 댓글을 써줘
+- 존댓말 기본 (~요 체)
+- 1~3문장으로 짧게
+- 매번 다른 톤과 내용으로 써줘. 정해진 패턴 없이 자유롭게
+- 글 내용에 언급된 구체적인 상황(이름, 장소, 숫자, 사건 등)을 반영해서 써줘
 
 [절대 금지]
 - "AI", "봇", "생성" 같은 단어
-- 반말 사용 금지
-- 다른 댓글과 비슷한 패턴 반복 금지 ("아 진짜 저도~" 로 시작하는 패턴 등)
-- 4문장 이상 금지`;
+- 반말 금지
+- "아 진짜 저도~", "힘내세요!!" 같은 뻔한 패턴 반복
+- 4문장 이상`;
 
-  const userPrompt = `[${postCategory}] "${postTitle}"\n\n${postContent}\n\n위 글에 ${persona.age} ${persona.gender} ${persona.trait} 사용자가 쓸법한 자연스러운 댓글 1개만. 댓글 내용만 출력해.`;
+  const userPrompt = `[${postCategory}] "${postTitle}"
+
+${postContent}
+
+위 글을 꼼꼼히 읽고, 이 상황에 맞는 10대 사용자의 자연스러운 댓글 1개만 써줘. 댓글 내용만 출력해.`;
 
   return await callLLM(systemPrompt, userPrompt);
 }
