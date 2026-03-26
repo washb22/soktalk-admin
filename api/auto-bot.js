@@ -1,21 +1,155 @@
 // api/auto-bot.js - 자동 댓글 & 글 작성 봇
 // Vercel Cron으로 하루 1회 실행
+// firebase-admin 대신 Firestore REST API 직접 사용 (의존성 제로)
 
-import { initializeApp, cert, getApps } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+// ── Google OAuth2 토큰 발급 (서비스 계정) ──
+async function getAccessToken() {
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
 
-// Firebase Admin 초기화
-function getDb() {
-  if (getApps().length === 0) {
-    initializeApp({
-      credential: cert({
-        projectId: process.env.FIREBASE_PROJECT_ID || 'soktalk-3e359',
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
-      }),
-    });
+  if (!clientEmail || !privateKey) {
+    throw new Error('Firebase credentials not configured');
   }
-  return getFirestore();
+
+  // JWT 생성
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: clientEmail,
+    scope: 'https://www.googleapis.com/auth/datastore',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+  };
+
+  const { createSign } = await import('crypto');
+
+  const encode = (obj) =>
+    Buffer.from(JSON.stringify(obj)).toString('base64url');
+
+  const unsignedToken = `${encode(header)}.${encode(payload)}`;
+  const sign = createSign('RSA-SHA256');
+  sign.update(unsignedToken);
+  const signature = sign.sign(privateKey, 'base64url');
+  const jwt = `${unsignedToken}.${signature}`;
+
+  // JWT로 액세스 토큰 교환
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+  });
+
+  const tokenData = await tokenRes.json();
+  if (!tokenData.access_token) {
+    throw new Error(`Token error: ${JSON.stringify(tokenData)}`);
+  }
+  return tokenData.access_token;
+}
+
+// ── Firestore REST API 헬퍼 ──
+const PROJECT_ID = 'soktalk-3e359';
+const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
+
+function toFirestoreValue(val) {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === 'string') return { stringValue: val };
+  if (typeof val === 'number') {
+    if (Number.isInteger(val)) return { integerValue: String(val) };
+    return { doubleValue: val };
+  }
+  if (typeof val === 'boolean') return { booleanValue: val };
+  if (val instanceof Date) return { timestampValue: val.toISOString() };
+  if (Array.isArray(val)) {
+    return { arrayValue: { values: val.map(toFirestoreValue) } };
+  }
+  if (typeof val === 'object') {
+    const fields = {};
+    for (const [k, v] of Object.entries(val)) {
+      fields[k] = toFirestoreValue(v);
+    }
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(val) };
+}
+
+function fromFirestoreValue(val) {
+  if ('stringValue' in val) return val.stringValue;
+  if ('integerValue' in val) return parseInt(val.integerValue);
+  if ('doubleValue' in val) return val.doubleValue;
+  if ('booleanValue' in val) return val.booleanValue;
+  if ('nullValue' in val) return null;
+  if ('timestampValue' in val) return new Date(val.timestampValue);
+  if ('arrayValue' in val) return (val.arrayValue.values || []).map(fromFirestoreValue);
+  if ('mapValue' in val) {
+    const obj = {};
+    for (const [k, v] of Object.entries(val.mapValue.fields || {})) {
+      obj[k] = fromFirestoreValue(v);
+    }
+    return obj;
+  }
+  return null;
+}
+
+function fromFirestoreDoc(doc) {
+  const obj = {};
+  for (const [k, v] of Object.entries(doc.fields || {})) {
+    obj[k] = fromFirestoreValue(v);
+  }
+  // 문서 ID 추출
+  const pathParts = doc.name.split('/');
+  obj._id = pathParts[pathParts.length - 1];
+  return obj;
+}
+
+async function firestoreQuery(accessToken, structuredQuery) {
+  const res = await fetch(`${FIRESTORE_BASE}:runQuery`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ structuredQuery }),
+  });
+  const data = await res.json();
+  return (data || [])
+    .filter((item) => item.document)
+    .map((item) => fromFirestoreDoc(item.document));
+}
+
+async function firestoreAdd(accessToken, collectionPath, data) {
+  const fields = {};
+  for (const [k, v] of Object.entries(data)) {
+    fields[k] = toFirestoreValue(v);
+  }
+  const res = await fetch(`${FIRESTORE_BASE}/${collectionPath}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fields }),
+  });
+  return await res.json();
+}
+
+async function firestoreUpdate(accessToken, docPath, data) {
+  const fields = {};
+  const updateMask = [];
+  for (const [k, v] of Object.entries(data)) {
+    fields[k] = toFirestoreValue(v);
+    updateMask.push(k);
+  }
+  const params = updateMask.map((f) => `updateMask.fieldPaths=${f}`).join('&');
+  const res = await fetch(`${FIRESTORE_BASE}/${docPath}?${params}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fields }),
+  });
+  return await res.json();
 }
 
 // ── 랜덤 닉네임 생성 ──
@@ -29,13 +163,6 @@ const nouns = [
   '고민러', '연인', '짝꿍', '몽상가', '힐러', '감성러',
   '직진러', '밀당러', '순정파', '로맨티스트',
 ];
-
-function randomName() {
-  const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-  const noun = nouns[Math.floor(Math.random() * nouns.length)];
-  const num = Math.floor(Math.random() * 100);
-  return `${adj}${noun}${num}`;
-}
 
 function randomUserId() {
   return `bot_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
@@ -171,7 +298,6 @@ JSON으로만 출력해.`;
   const result = await callGPT(systemPrompt, userPrompt);
 
   try {
-    // JSON 파싱 (코드블록 제거)
     const cleaned = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     return JSON.parse(cleaned);
   } catch {
@@ -199,40 +325,64 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const db = getDb();
   const results = { comments: [], posts: [], errors: [] };
 
   try {
+    const accessToken = await getAccessToken();
+
     // ─── 1. 댓글 없는 글 찾아서 댓글 달기 ───
-    const postsSnapshot = await db
-      .collection('posts')
-      .where('commentsCount', '==', 0)
-      .orderBy('createdAt', 'desc')
-      .limit(10)
-      .get();
-
-    // 댓글이 적은 글도 추가 (1~2개인 글)
-    const fewCommentsSnapshot = await db
-      .collection('posts')
-      .where('commentsCount', 'in', [1, 2])
-      .orderBy('createdAt', 'desc')
-      .limit(5)
-      .get();
-
-    const postsToComment = [];
-    postsSnapshot.forEach((doc) => postsToComment.push({ id: doc.id, ...doc.data() }));
-    fewCommentsSnapshot.forEach((doc) => {
-      if (!postsToComment.find((p) => p.id === doc.id)) {
-        postsToComment.push({ id: doc.id, ...doc.data() });
-      }
+    const postsToComment = await firestoreQuery(accessToken, {
+      from: [{ collectionId: 'posts' }],
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'commentsCount' },
+          op: 'EQUAL',
+          value: { integerValue: '0' },
+        },
+      },
+      orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }],
+      limit: 10,
     });
 
+    // 댓글 적은 글도 추가
+    const fewCommentsPosts = await firestoreQuery(accessToken, {
+      from: [{ collectionId: 'posts' }],
+      where: {
+        compositeFilter: {
+          op: 'AND',
+          filters: [
+            {
+              fieldFilter: {
+                field: { fieldPath: 'commentsCount' },
+                op: 'GREATER_THAN_OR_EQUAL',
+                value: { integerValue: '1' },
+              },
+            },
+            {
+              fieldFilter: {
+                field: { fieldPath: 'commentsCount' },
+                op: 'LESS_THAN_OR_EQUAL',
+                value: { integerValue: '2' },
+              },
+            },
+          ],
+        },
+      },
+      orderBy: [{ field: { fieldPath: 'commentsCount' }, direction: 'ASCENDING' }],
+      limit: 5,
+    });
+
+    const allPosts = [...postsToComment];
+    for (const p of fewCommentsPosts) {
+      if (!allPosts.find((x) => x._id === p._id)) allPosts.push(p);
+    }
+
     // 각 글에 댓글 1개씩 생성
-    for (const post of postsToComment) {
+    for (const post of allPosts) {
       try {
         const commentText = await generateComment(
           post.title || '',
-          (post.content || '').substring(0, 500),
+          ((post.content || '') + '').substring(0, 500),
           post.category || '연애상담'
         );
 
@@ -241,30 +391,28 @@ export default async function handler(req, res) {
         const commentData = {
           text: commentText,
           userId: randomUserId(),
-          userName: null, // 익명
+          userName: null,
           isAnonymous: true,
           createdAt: new Date(),
           likes: [],
           isPinned: false,
         };
 
-        await db.collection('posts').doc(post.id).collection('comments').add(commentData);
+        await firestoreAdd(accessToken, `posts/${post._id}/comments`, commentData);
 
         // commentsCount 업데이트
-        await db
-          .collection('posts')
-          .doc(post.id)
-          .update({
-            commentsCount: FieldValue.increment(1),
-          });
+        const newCount = (post.commentsCount || 0) + 1;
+        await firestoreUpdate(accessToken, `posts/${post._id}`, {
+          commentsCount: newCount,
+        });
 
         results.comments.push({
-          postId: post.id,
+          postId: post._id,
           postTitle: post.title,
           comment: commentText,
         });
       } catch (err) {
-        results.errors.push({ type: 'comment', postId: post.id, error: err.message });
+        results.errors.push({ type: 'comment', postId: post._id, error: err.message });
       }
     }
 
@@ -280,9 +428,8 @@ export default async function handler(req, res) {
           const postContent = await generatePost(category);
           if (!postContent || !postContent.title || !postContent.content) continue;
 
-          // createdAt을 하루 안에서 랜덤 분산 (자연스럽게 보이도록)
           const now = new Date();
-          const randomMinutes = Math.floor(Math.random() * 1440); // 0~1440분(24시간)
+          const randomMinutes = Math.floor(Math.random() * 1440);
           const spreadTime = new Date(now.getTime() - randomMinutes * 60 * 1000);
 
           const postData = {
@@ -300,10 +447,11 @@ export default async function handler(req, res) {
             isAdminPost: true,
           };
 
-          const docRef = await db.collection('posts').add(postData);
+          const docRef = await firestoreAdd(accessToken, 'posts', postData);
+          const docId = docRef.name ? docRef.name.split('/').pop() : 'unknown';
 
           results.posts.push({
-            id: docRef.id,
+            id: docId,
             title: postContent.title,
             category,
           });
