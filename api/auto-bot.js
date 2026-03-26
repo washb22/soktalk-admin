@@ -378,7 +378,8 @@ export default async function handler(req, res) {
     const accessToken = await getAccessToken();
 
     // ─── 1. 댓글 없는 글 찾아서 댓글 달기 ───
-    const postsToComment = await firestoreQuery(accessToken, {
+    // 최신 글 (댓글 0개)
+    const recentNoPosts = await firestoreQuery(accessToken, {
       from: [{ collectionId: 'posts' }],
       where: {
         fieldFilter: {
@@ -388,10 +389,24 @@ export default async function handler(req, res) {
         },
       },
       orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }],
+      limit: 15,
+    });
+
+    // 오래된 글도 포함 (댓글 0개, 오래된 순)
+    const oldNoPosts = await firestoreQuery(accessToken, {
+      from: [{ collectionId: 'posts' }],
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'commentsCount' },
+          op: 'EQUAL',
+          value: { integerValue: '0' },
+        },
+      },
+      orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'ASCENDING' }],
       limit: 10,
     });
 
-    // 댓글 적은 글도 추가
+    // 댓글 적은 글도 추가 (1~2개인 글)
     const fewCommentsPosts = await firestoreQuery(accessToken, {
       from: [{ collectionId: 'posts' }],
       where: {
@@ -416,12 +431,17 @@ export default async function handler(req, res) {
         },
       },
       orderBy: [{ field: { fieldPath: 'commentsCount' }, direction: 'ASCENDING' }],
-      limit: 5,
+      limit: 10,
     });
 
-    const allPosts = [...postsToComment];
-    for (const p of fewCommentsPosts) {
-      if (!allPosts.find((x) => x._id === p._id)) allPosts.push(p);
+    // 중복 제거하면서 합치기
+    const allPosts = [];
+    const seenIds = new Set();
+    for (const p of [...recentNoPosts, ...oldNoPosts, ...fewCommentsPosts]) {
+      if (!seenIds.has(p._id)) {
+        seenIds.add(p._id);
+        allPosts.push(p);
+      }
     }
 
     // 각 글에 댓글 1개씩 생성
@@ -469,6 +489,11 @@ export default async function handler(req, res) {
       { category: '잡담', count: 10 },
     ];
 
+    // 전체 글 수와 시간 슬롯 계산 (24시간에 고르게 분산)
+    const totalPosts = postPlan.reduce((sum, p) => sum + p.count, 0);
+    const slotMinutes = Math.floor(1440 / totalPosts); // 글 간격 (분)
+    let globalPostIndex = 0;
+
     for (const { category, count } of postPlan) {
       const createdTitles = [];
       for (let i = 0; i < count; i++) {
@@ -476,9 +501,13 @@ export default async function handler(req, res) {
           const postContent = await generatePost(category, createdTitles);
           if (!postContent || !postContent.title || !postContent.content) continue;
 
+          // 24시간 내 균등 분산 + 랜덤 지터(±30분)
           const now = new Date();
-          const randomMinutes = Math.floor(Math.random() * 1440);
-          const spreadTime = new Date(now.getTime() - randomMinutes * 60 * 1000);
+          const baseMinutes = globalPostIndex * slotMinutes;
+          const jitter = Math.floor(Math.random() * 60) - 30; // -30 ~ +30분
+          const offsetMinutes = Math.max(0, Math.min(1439, baseMinutes + jitter));
+          const spreadTime = new Date(now.getTime() - offsetMinutes * 60 * 1000);
+          globalPostIndex++;
 
           const postData = {
             title: postContent.title,
