@@ -70,7 +70,10 @@ export default async function handler(req, res) {
       return count === undefined || count === null || count <= 2;
     });
 
-    for (const post of allPosts) {
+    // 한 번 실행 시 댓글 1개만 생성
+    const targetPosts = allPosts.slice(0, 1);
+
+    for (const post of targetPosts) {
       try {
         const commentText = await generateComment(
           post.title || '',
