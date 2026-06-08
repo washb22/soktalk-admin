@@ -39,7 +39,8 @@ function Notices() {
   const [category, setCategory] = useState('전체');
   const [imageUrl, setImageUrl] = useState('');
   const [imagePreview, setImagePreview] = useState('');
-  
+  const [showAsPopup, setShowAsPopup] = useState(false);
+
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -72,6 +73,7 @@ function Notices() {
     setCategory('전체');
     setImageUrl('');
     setImagePreview('');
+    setShowAsPopup(false);
     setEditingNotice(null);
     setShowForm(false);
   };
@@ -144,6 +146,7 @@ function Notices() {
           content: content.trim(),
           category,
           imageUrl: imageUrl || null,
+          showAsPopup,
           updatedAt: new Date(),
         });
         alert('공지사항이 수정되었습니다.');
@@ -154,6 +157,7 @@ function Notices() {
           content: content.trim(),
           category,
           imageUrl: imageUrl || null,
+          showAsPopup,
           isActive: true,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -178,6 +182,7 @@ function Notices() {
     setCategory(notice.category || '전체');
     setImageUrl(notice.imageUrl || '');
     setImagePreview(notice.imageUrl || '');
+    setShowAsPopup(notice.showAsPopup === true);
     setShowForm(true);
   };
 
@@ -218,6 +223,8 @@ function Notices() {
         return { backgroundColor: '#FFE8E8', color: '#FF6B6B' };
       case '잡담':
         return { backgroundColor: '#E8F4FF', color: '#4A90D9' };
+      case '뷰티':
+        return { backgroundColor: '#F8E8FF', color: '#A64AD9' };
       default:
         return { backgroundColor: '#E8FFE8', color: '#4CAF50' };
     }
@@ -264,7 +271,7 @@ function Notices() {
           <div style={styles.formGroup}>
             <label style={styles.label}>게시판</label>
             <div style={styles.categoryButtons}>
-              {['전체', '연애상담', '잡담'].map(cat => (
+              {['전체', '연애상담', '잡담', '뷰티'].map(cat => (
                 <button
                   key={cat}
                   onClick={() => setCategory(cat)}
@@ -339,6 +346,27 @@ function Notices() {
             />
           </div>
 
+          {/* 팝업 표시 토글 */}
+          <div style={styles.formGroup}>
+            <label
+              style={styles.popupToggle}
+              onClick={() => setShowAsPopup(v => !v)}
+            >
+              <input
+                type="checkbox"
+                checked={showAsPopup}
+                onChange={(e) => setShowAsPopup(e.target.checked)}
+                style={styles.popupCheckbox}
+              />
+              <div>
+                <span style={styles.popupToggleTitle}>🎉 앱 실행 시 팝업으로 표시</span>
+                <span style={styles.popupToggleHint}>
+                  체크하면 사용자가 앱을 켤 때 이 공지가 팝업으로 떠요. (이벤트 안내에 추천 · 사용자는 '오늘 하루 보지 않기' 가능)
+                </span>
+              </div>
+            </label>
+          </div>
+
           <div style={styles.formActions}>
             <button onClick={resetForm} style={styles.cancelBtn}>
               취소
@@ -399,6 +427,9 @@ function Notices() {
                           <Image size={12} />
                           이미지
                         </span>
+                      )}
+                      {notice.showAsPopup && (
+                        <span style={styles.popupBadge}>🎉 팝업</span>
                       )}
                       <span style={styles.noticeDate}>
                         {formatDate(notice.createdAt)}
@@ -766,6 +797,44 @@ const styles = {
     padding: '8px',
     borderRadius: '6px',
     transition: 'background-color 0.2s',
+  },
+  popupToggle: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '10px',
+    padding: '14px 16px',
+    border: '1px solid #FFD6D6',
+    borderRadius: '8px',
+    backgroundColor: '#FFF6F6',
+    cursor: 'pointer',
+  },
+  popupCheckbox: {
+    width: '18px',
+    height: '18px',
+    marginTop: '2px',
+    cursor: 'pointer',
+    accentColor: '#FF6B6B',
+  },
+  popupToggleTitle: {
+    display: 'block',
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: '4px',
+  },
+  popupToggleHint: {
+    display: 'block',
+    fontSize: '12px',
+    color: '#999',
+    lineHeight: '1.5',
+  },
+  popupBadge: {
+    padding: '2px 8px',
+    backgroundColor: '#FFE8E8',
+    borderRadius: '4px',
+    fontSize: '11px',
+    fontWeight: '600',
+    color: '#FF6B6B',
   },
 };
 

@@ -129,7 +129,7 @@ function WritePost() {
           <div style={styles.formGroup}>
             <label style={styles.label}>카테고리</label>
             <div style={styles.categoryButtons}>
-              {['연애상담', '잡담'].map(cat => (
+              {['연애상담', '잡담', '뷰티'].map(cat => (
                 <button
                   key={cat}
                   type="button"
