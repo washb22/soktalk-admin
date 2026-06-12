@@ -390,33 +390,8 @@ export default async function handler(req, res) {
       limit: 200,
     });
 
-    // 댓글 1~2개인 글도 포함
-    const fewCommentsPosts = await firestoreQuery(accessToken, {
-      from: [{ collectionId: 'posts' }],
-      where: {
-        compositeFilter: {
-          op: 'AND',
-          filters: [
-            {
-              fieldFilter: {
-                field: { fieldPath: 'commentsCount' },
-                op: 'GREATER_THAN_OR_EQUAL',
-                value: { integerValue: '1' },
-              },
-            },
-            {
-              fieldFilter: {
-                field: { fieldPath: 'commentsCount' },
-                op: 'LESS_THAN_OR_EQUAL',
-                value: { integerValue: '2' },
-              },
-            },
-          ],
-        },
-      },
-      orderBy: [{ field: { fieldPath: 'commentsCount' }, direction: 'ASCENDING' }],
-      limit: 100,
-    });
+    // 글당 봇 댓글 1개로 제한 → 댓글 1~2개인 글은 대상에서 제외
+    const fewCommentsPosts = [];
 
     // 중복 제거하면서 합치기
     const allPosts = [];
@@ -528,7 +503,7 @@ export default async function handler(req, res) {
     // ─── 3. 방금 생성한 글에 댓글 1~2개씩 달기 ───
     for (const posted of results.posts) {
       try {
-        const commentCount = Math.random() < 0.5 ? 1 : 2;
+        const commentCount = 1;
         for (let c = 0; c < commentCount; c++) {
           const commentText = await generateComment(
             posted.title || '',

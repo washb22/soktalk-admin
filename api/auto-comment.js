@@ -64,10 +64,10 @@ export default async function handler(req, res) {
       limit: 500,
     });
 
-    // commentsCount가 없거나 0~2인 글만 필터
+    // 댓글이 하나도 없는 글만 필터 (글당 봇 댓글 1개로 제한)
     const allPosts = allPostsRaw.filter(p => {
       const count = p.commentsCount;
-      return count === undefined || count === null || count <= 2;
+      return count === undefined || count === null || count === 0;
     });
 
     // 한 번 실행 시 댓글 1개만 생성
